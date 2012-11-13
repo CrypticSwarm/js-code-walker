@@ -7029,6 +7029,7 @@ EventEmitter.prototype.listeners = function(type) {
 require.define("/cpsjs/test.js",function(require,module,exports,__dirname,__filename,process,global){var convert = require('./cpstransform')
 var esprima = require('esprima').parse
 var escodegen = require('escodegen').generate
+var EventEmitter = require('events').EventEmitter
 var Memory = require('../memory-tree/memoryProxy')
 var showCode = process.argv.some(function (arg) {
   if (arg === '--code') return true
@@ -7062,9 +7063,8 @@ function run(str, expected) {
 
   function __end(val) {
     __stack.pop()
-    setTimeout(function(){
     update(__stack)
-    }, 1800)
+    nextTick = null
     console.log(__stack)
     if (val === expected) {
       console.log('\033[0;32mRun number (' + runNum + ')\033[m')
@@ -7076,24 +7076,33 @@ function run(str, expected) {
 
   function __continuation(val, cb) {
     if (arguments.length === 1) cb = val,val=null;
-    setTimeout(function () {
-      __i_tick++
-      var curItem = __stack[__stack.length - 1]
-      //console.log('tick', __i_tick , ': ', val)
-      console.log(__stack)
-      //console.log(val)
-      update(__stack)
-      console.log(val)
+    nextTick = function() {
       cb(val)
-    }, 1800)
+    }
+    __i_tick++
+    var curItem = __stack[__stack.length - 1]
+    //console.log('tick', __i_tick , ': ', val)
+    console.log(__stack)
+    //console.log(val)
+    update(__stack)
+    console.log(val)
   }
   var code = escodegen(convert(esprima(str, { loc: true, range: true })))
-  if (showCode) print(code)
-  else eval(code)
+  var nextTick = function () {
+    eval(code)
+  }
+  function next() {
+    if (nextTick) nextTick()
+  }
+  var emitter = new EventEmitter()
+  emitter.next = next
+  return emitter
 }
 
+window.run = run
+
 //run('function plus(a,b) { return a + b; }\nplus(1+2, 3+4) + 5', 15)
-run('function add(a, b) { return a + b }\nfunction makeAdder(a){ return function plus(b) { return add(a, b) } }\nvar add1 = makeAdder(1); var add2 = makeAdder(2); add1(5) + add2(6);', 14)
+//run('function add(a, b) { return a + b }\nfunction makeAdder(a){ return function plus(b) { return add(a, b) } }\nvar add1 = makeAdder(1); var add2 = makeAdder(2); add1(5) + add2(6);', 14)
 //run('1 + 2 + 3 + 4+5+6* 3+4+5*4+5+6;', 68)
 //run('function plus(a,b) { return a+b; }\n plus(1, 2)+3;', 6)
 //run('var a=1,b=2,c=3,d=4,zzz=55,xxx=23; (function (a) { var x; return a + b + (c + d); var y, z = 4; })(zzz+xxx) + 2;', 89)

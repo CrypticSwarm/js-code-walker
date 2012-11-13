@@ -1,3 +1,33 @@
+var code = 'function add(a, b) { return a + b }\nfunction makeAdder(a){\n\treturn function plus(b) {\n\t\treturn add(a, b)\n\t}\n}\nvar add1 = makeAdder(1)\nvar add2 = makeAdder(2)\nadd1(5) + add2(6);'
+$('#editor').html(code)
+
+var start = $('#start')
+var stop = $('#stop')
+var next = $('#next')
+var prev = $('#prev')
+var prog
+
+next.click(function () {
+  if (next.hasClass('disabled')) return
+  prog.next()
+})
+start.click(function () {
+  if (start.hasClass('disabled')) return
+  start.addClass('disabled')
+  next.removeClass('disabled')
+  stop.removeClass('disabled')
+  var code = editor.getSession().getValue()
+  editor.setReadOnly(true)
+  prog = run(code, 14)
+})
+stop.click(function() {
+  if (stop.hasClass('disabled')) return
+  stop.addClass('disabled')
+  next.addClass('disabled')
+  start.removeClass('disabled')
+  editor.setReadOnly(false)
+})
+
 var editor = ace.edit("editor");
 editor.setTheme("ace/theme/twilight");
 editor.getSession().setMode("ace/mode/javascript");

@@ -11,9 +11,11 @@
       <div class="span7">
         <div class="btn-toolbar">
           <div class="btn-group">
-            <a class="btn" href="#"><i class="icon-arrow-left" disabled></i></a>
-            <a class="btn" href="#"><i class="icon-arrow-right"></i></a>
+            <a class="btn disabled" id="prev" href="#"><i class="icon-arrow-left"></i></a>
+            <a class="btn disabled" id="next" href="#"><i class="icon-arrow-right"></i></a>
           </div>
+          <a class="btn btn-primary" id="start" href="#"><i class="icon-play icon-white"></i> Walk the Code</a>
+          <a class="btn btn-warning disabled" id="stop" href="#"><i class="icon-stop icon-white"></i> Talk the Code</a>
         </div>
       </div>
     </div>
@@ -30,8 +32,9 @@
     </div>
   </div>
     <script src="ace/ace.js"></script>
+    <script src="js/jquery-1.8.2.min.js"></script>
     <script src="js/d3.v2.js"></script>
-    <script src="js/main.js"></script>
     <script src="js/build.js"></script>
+    <script src="js/main.js"></script>
   </body>
 </html>
