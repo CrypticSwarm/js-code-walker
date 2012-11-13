@@ -781,10 +781,10 @@ module.exports = { ExpressionStatement: ExpressionStatement
 
 });
 
-require.define("/cpsjs/node_modules/esprima/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"esprima.js"}
+require.define("/stepper/node_modules/esprima/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"esprima.js"}
 });
 
-require.define("/cpsjs/node_modules/esprima/esprima.js",function(require,module,exports,__dirname,__filename,process,global){/*
+require.define("/stepper/node_modules/esprima/esprima.js",function(require,module,exports,__dirname,__filename,process,global){/*
   Copyright (C) 2012 Ariya Hidayat <ariya.hidayat@gmail.com>
   Copyright (C) 2012 Mathias Bynens <mathias@qiwi.be>
   Copyright (C) 2012 Joost-Wim Boekesteijn <joost-wim@boekesteijn.nl>
@@ -4364,10 +4364,10 @@ parseStatement: true, parseSourceElement: true */
 
 });
 
-require.define("/cpsjs/node_modules/escodegen/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"escodegen.js"}
+require.define("/stepper/node_modules/escodegen/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"escodegen.js"}
 });
 
-require.define("/cpsjs/node_modules/escodegen/escodegen.js",function(require,module,exports,__dirname,__filename,process,global){/*
+require.define("/stepper/node_modules/escodegen/escodegen.js",function(require,module,exports,__dirname,__filename,process,global){/*
   Copyright (C) 2012 Michael Ficarra <escodegen.copyright@michael.ficarra.me>
   Copyright (C) 2012 Robert Gust-Bardon <donate@robert.gust-bardon.org>
   Copyright (C) 2012 John Freeman <jfreeman08@gmail.com>
@@ -7026,92 +7026,51 @@ EventEmitter.prototype.listeners = function(type) {
 
 });
 
-require.define("/cpsjs/test.js",function(require,module,exports,__dirname,__filename,process,global){var convert = require('./cpstransform')
+require.define("/stepper/walker.js",function(require,module,exports,__dirname,__filename,process,global){var convert = require('../cpsjs/cpstransform')
 var esprima = require('esprima').parse
 var escodegen = require('escodegen').generate
-var EventEmitter = require('events').EventEmitter
 var Memory = require('../memory-tree/memoryProxy')
-var showCode = process.argv.some(function (arg) {
-  if (arg === '--code') return true
-})
+var EventEmitter = require('events').EventEmitter
 
-function print(what) {
-  process.stdout.write('\033[92m')
-  process.stdout.write(what)
-  process.stdout.write('\033[39m')
-  process.stdout.write('\n\n')
-}
-
-var runCounter = 0
-function run(str, expected) {
-  var __i_tick = 0
+function run(str) {
   var __undefined
   var scopeInfoMap = new WeakMap()
   var globalScopeInfo = Memory.Scope({ a: 1, b: 2}, Memory({}))
   var __globalScope = globalScopeInfo[0]
   var __stack = []
-  var runNum = ++runCounter
+  var emitter = new EventEmitter()
+  var ast = convert(esprima(str, { loc: true, range: true }))
+  var code = escodegen(ast)
+
+  emitter.next = function () { eval(code) }
   scopeInfoMap.set(__globalScope, globalScopeInfo)
+  globalScopeInfo.viewAll = true
 
   function __createScopeObject(scopeDef, parentScope) {
     var parentScopeInfo = scopeInfoMap.get(parentScope)
     var scopeInfo = Memory.Scope(scopeDef, parentScopeInfo)
-    scopeInfoMap.set(scopeInfo[0], scopeInfo)
     scopeInfo[1].viewAll = true
+    scopeInfoMap.set(scopeInfo[0], scopeInfo)
     return scopeInfo[0]
   }
 
   function __end(val) {
     __stack.pop()
-    update(__stack)
-    nextTick = null
-    console.log(__stack)
-    if (val === expected) {
-      console.log('\033[0;32mRun number (' + runNum + ')\033[m')
-    }
-    else {
-      console.log('\033[0;31mRun number (' + runNum + ')\033[m', val, expected)
-    }
+    emitter.emit('tick', __stack)
+    emitter.emit('end', __stack)
   }
 
   function __continuation(val, cb) {
     if (arguments.length === 1) cb = val,val=null;
-    nextTick = function() {
-      cb(val)
-    }
-    __i_tick++
-    var curItem = __stack[__stack.length - 1]
-    //console.log('tick', __i_tick , ': ', val)
-    console.log(__stack)
-    //console.log(val)
-    update(__stack)
-    console.log(val)
+    var curScope = __stack[__stack.length - 1]
+    emitter.emit('tick', __stack)
+    emitter.next = cb.bind(null, val)
   }
-  var code = escodegen(convert(esprima(str, { loc: true, range: true })))
-  var nextTick = function () {
-    eval(code)
-  }
-  function next() {
-    if (nextTick) nextTick()
-  }
-  var emitter = new EventEmitter()
-  emitter.next = next
+
   return emitter
 }
-
 window.run = run
 
-//run('function plus(a,b) { return a + b; }\nplus(1+2, 3+4) + 5', 15)
-//run('function add(a, b) { return a + b }\nfunction makeAdder(a){ return function plus(b) { return add(a, b) } }\nvar add1 = makeAdder(1); var add2 = makeAdder(2); add1(5) + add2(6);', 14)
-//run('1 + 2 + 3 + 4+5+6* 3+4+5*4+5+6;', 68)
-//run('function plus(a,b) { return a+b; }\n plus(1, 2)+3;', 6)
-//run('var a=1,b=2,c=3,d=4,zzz=55,xxx=23; (function (a) { var x; return a + b + (c + d); var y, z = 4; })(zzz+xxx) + 2;', 89)
-//run('function plus(a,b) { return a + b; }\n(plus(1,2) + plus(3+4+5,6+7+8))', 36)
-//run('1 + 2 + 3 + 4; 3 + 2; 9 + 12; 123 + 123;', 246)
-//run('if (x) x = 4; else x = 5; x+1', 6)
-//run('factorial(5)\nfunction factorial(n) { var x; if (n === 0) x = 1; else x = n * factorial(n - 1); return x+0 }', 120)
-//run('var a = { b: { c: 1 } }, x = { y: { z: 5 } }; a.b.c + x.y.z', 6)
-
 });
-require("/cpsjs/test.js");
+require("/stepper/walker.js");
 })();

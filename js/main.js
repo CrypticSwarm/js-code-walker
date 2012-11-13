@@ -19,14 +19,17 @@ start.click(function () {
   var code = editor.getSession().getValue()
   editor.setReadOnly(true)
   prog = run(code, 14)
+  prog.on('tick', update)
+  prog.on('end', enableCode)
 })
-stop.click(function() {
+stop.click(enableCode)
+function enableCode() {
   if (stop.hasClass('disabled')) return
   stop.addClass('disabled')
   next.addClass('disabled')
   start.removeClass('disabled')
   editor.setReadOnly(false)
-})
+}
 
 var editor = ace.edit("editor");
 editor.setTheme("ace/theme/twilight");
