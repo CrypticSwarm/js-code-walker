@@ -1,0 +1,25 @@
+.node rect {
+  fill: #fff;
+  stroke: #ffcc99;
+  stroke-width: 1.5px;
+}   
+
+.node {
+  font: 12px sans-serif;
+}   
+
+.link {
+  fill: none;
+  stroke: #ccc;
+  stroke-width: 1.5px;
+}   
+
+#stack {
+  background-color: #333;
+}
+#editor {
+  height: 500px;
+  background-color: #999;
+}
+svg {
+}
