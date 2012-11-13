@@ -1,3 +1,16 @@
+var editor = ace.edit("editor");
+editor.setTheme("ace/theme/twilight");
+editor.getSession().setMode("ace/mode/javascript");
+
+/*
+editor.getSession().removeMarker(marker);
+ace.require(['ace/range'], function(a) {
+    console.log('ACED', Range)
+      range = new a.Range(0, 4, 0, 10);
+        marker = editor.getSession().addMarker(range,"ace_selected_word", "text");
+})
+*/
+
 var width = 300,
   height = 500;
 
@@ -7,11 +20,11 @@ var tree = d3.layout.tree()
     var undefined
     return d.length > 1 ? [d.slice(1)] : undefined
   })
-  var vis = d3.select("#stack").append("svg")
+  var vis = d3.select("#visualContainer").append("svg")
     .attr("width", width)
     .attr("height", height)
     .append("g")
-    .attr("transform", "translate(0, 20)");
+    .attr("transform", "translate(0, 0)");
   var diagonal = d3.svg.diagonal()
 
 function prettyprintFunction(fn) {

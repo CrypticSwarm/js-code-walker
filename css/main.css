@@ -1,5 +1,5 @@
 .node rect {
-  fill: #fff;
+  fill: #ccc;
   stroke: #ffcc99;
   stroke-width: 1.5px;
 }   
@@ -14,12 +14,33 @@
   stroke-width: 1.5px;
 }   
 
-#stack {
-  background-color: #333;
-}
-#editor {
-  height: 500px;
+.row-fluid {
   background-color: #999;
 }
-svg {
+html, body, #visualContainer, #editorContainer, #main, .container-fluid {
+  height: 100%;
+  background-color: #999;
+}
+body {
+  overflow: hidden;
+}
+#editor {
+  padding: 0px;
+  border: 0px;
+}
+.ace_editor {
+  position: relative !important;
+  margin: 0px auto;
+  height: 100%;
+  width: 100%;
+}
+#editorContainer .ace_scrollbar {
+  background-color: #999;
+  overflow-y: auto;
+}
+
+.ace_marker-layer .ace_selected_word {
+  position: absolute;
+  z-index: 5;
+  background-color: green;
 }

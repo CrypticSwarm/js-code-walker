@@ -6,11 +6,30 @@
     <link rel="stylesheet" href="bootstrap/css/bootstrap.min.css" />
   </head>
   <body>
+  <div class="container-fluid">
     <div class="row-fluid">
-      <div class="span9" id="editor"></div>
-      <div class="span3" id="stack"></div>
+      <div class="span7">
+        <div class="btn-toolbar">
+          <div class="btn-group">
+            <a class="btn" href="#"><i class="icon-arrow-left" disabled></i></a>
+            <a class="btn" href="#"><i class="icon-arrow-right"></i></a>
+          </div>
+        </div>
+      </div>
     </div>
-    <script src="bootstrap/js/bootstrap.min.js"></script>
+    <div class="row-fluid" id="main">
+      <div class="span7" id="editorContainer">
+<pre id="editor">function foo(items) {
+  var i;
+  for (i = 0; i &lt; items.length; i++) {
+    alert("Ace Rocks " + items[i]);
+  }
+}</pre>
+      </div>
+      <div class="span5" id="visualContainer"></div>
+    </div>
+  </div>
+    <script src="ace/ace.js"></script>
     <script src="js/d3.v2.js"></script>
     <script src="js/main.js"></script>
     <script src="js/build.js"></script>
