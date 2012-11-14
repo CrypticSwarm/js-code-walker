@@ -1,6 +1,6 @@
 ace.require(['ace/range'], function(a) {
   var Range = a.Range
-  var code = 'function add(a, b) { return a + b }\nfunction makeAdder(a){\n\treturn function plus(b) {\n\t\treturn add(a, b)\n\t}\n}\nvar add1 = makeAdder(1)\nvar add2 = makeAdder(2)\nadd1(5) + add2(6);'
+  var code = 'function add(a, b) { return a + b }\nfunction makeAdder(a){\n\treturn function plus(b) {\n\t\treturn add(a, b)\n\t}\n}\nvar add1 = makeAdder(1)\nvar add2 = makeAdder(2)\nadd1(5) + add2(6)'
   d3.select('#editor').html(code)
 
   var start = d3.select('#start')
@@ -37,12 +37,12 @@ ace.require(['ace/range'], function(a) {
     prog = null
   }
 
-  var editor = ace.edit("editor");
-  editor.setTheme("ace/theme/twilight");
-  editor.getSession().setMode("ace/mode/javascript");
+  var editor = ace.edit("editor")
+  editor.setTheme("ace/theme/twilight")
+  editor.getSession().setMode("ace/mode/javascript")
 
   var width = 300,
-    height = 500;
+    height = 500
 
   var tree = d3.layout.tree()
     .size([width, height - 160])
@@ -54,7 +54,7 @@ ace.require(['ace/range'], function(a) {
       .attr("width", width)
       .attr("height", height)
       .append("g")
-      .attr("transform", "translate(0, 0)");
+      .attr("transform", "translate(0, 0)")
     var diagonal = d3.svg.diagonal()
 
   function prettyprintFunction(fn) {
@@ -66,13 +66,13 @@ ace.require(['ace/range'], function(a) {
     var exp = shaList[sha]
     var start = exp.loc.start
     var end = exp.loc.end
-    var range = new a.Range(start.line - 1, start.column, end.line - 1, end.column);
-    var marker = editor.getSession().addMarker(range, type, "text");
+    var range = new a.Range(start.line - 1, start.column, end.line - 1, end.column)
+    var marker = editor.getSession().addMarker(range, type, "text")
     return marker
   }
 
   function removeMarker(marker) {
-    editor.getSession().removeMarker(marker);
+    editor.getSession().removeMarker(marker)
   }
 
   function update(data, curSha, shaList) {
@@ -83,14 +83,14 @@ ace.require(['ace/range'], function(a) {
     if (curExpressionMarker) removeMarker(curExpressionMarker)
     curExpressionMarker = setMarker(curSha, shaList, 'curExpression')
 
-    var nodes = tree.nodes(data);
+    var nodes = tree.nodes(data)
 
     if (data.length > 1) {
     var link = vis.selectAll("path.link")
       .data(tree.links(nodes))
       .enter().append("path")
       .attr("class", "link")
-      .attr("d", diagonal);
+      .attr("d", diagonal)
     }
 
     var node = vis.selectAll("g.node")
@@ -100,7 +100,7 @@ ace.require(['ace/range'], function(a) {
 
     var nodeGroup = node.enter().append("g")
       .attr("class", "node")
-      .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; })
+      .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")" })
       
 
     nodeGroup.append("rect")
@@ -131,8 +131,8 @@ ace.require(['ace/range'], function(a) {
         scopeIndex[d.key].forEach(function (ident) {
           var start = ident.loc.start
           var end = ident.loc.end
-          var range = new a.Range(start.line - 1, start.column, end.line - 1, end.column);
-          var marker = editor.getSession().addMarker(range,"scopedVariableFinder", "text");
+          var range = new a.Range(start.line - 1, start.column, end.line - 1, end.column)
+          var marker = editor.getSession().addMarker(range,"scopedVariableFinder", "text")
           markList.push(marker)
         })
       })
@@ -144,6 +144,6 @@ ace.require(['ace/range'], function(a) {
       })
       .text(function(d) {
         return d.key + ': ' + (typeof d.val === 'function' ? prettyprintFunction(d.val) : d.val)
-      });
+      })
   }
 })
