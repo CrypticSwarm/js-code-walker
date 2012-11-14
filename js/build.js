@@ -397,7 +397,7 @@ require.define("/cpsjs/package.json",function(require,module,exports,__dirname,_
 require.define("/cpsjs/cpstransform.js",function(require,module,exports,__dirname,__filename,process,global){var transform = require('./transform')
 
 function convertToCPS(fnBody) {
-  return transform.dispatch(fnBody)
+  return transform(fnBody)
 }
 
 module.exports = convertToCPS
@@ -407,24 +407,19 @@ module.exports = convertToCPS
 
 require.define("/cpsjs/transform.js",function(require,module,exports,__dirname,__filename,process,global){var pred = require('./predicates')
 var wrap = require('./wrap')
-var transform
+var crypto = require('crypto')
 
-function dispatch(node, contin, varContin) {
-  return transform[node.type] ? transform[node.type](node, contin, varContin)
-       : continuation(node, contin())
-}
-
-function endingContin() {
-  return wrap.Identifier('__end')
-}
-
-function continuation(val, func) {
-  return wrap.FunctionExpression(wrap.BlockStatement([
-    wrap.ExpressionStatement(
-      wrap.CallExpression(
-        wrap.Identifier('__continuation'),
-        [val, func]))]))
-}
+var continId = wrap.Identifier('__continuation')
+var pscopeId = wrap.Identifier('__parentScope')
+var gscopeId = wrap.Identifier('__globalScope')
+var scopeId = wrap.Identifier('__scope')
+var createScopeId = wrap.Identifier('__createScopeObject')
+var stackId = wrap.Identifier('__stack')
+var pushStackId = wrap.Identifier('__pushStack')
+var popStackId = wrap.Identifier('__popStack')
+var undefinedId = wrap.Identifier('__undefined') 
+var returnId = wrap.Identifier('__return')
+var argId = wrap.Identifier('arguments')
 
 var gensym = (function () {
   var id = 0
@@ -434,230 +429,278 @@ var gensym = (function () {
   }
 })()
 
-function dotChain(arr) {
-  return arr.map(wrap.Identifier).reduce(wrap.MemberExpression)
+function cloneSha(node, clone) {
+  clone.sha = node.sha
+  clone.parent = node.parent
+  return clone
 }
 
-function addParentScope(body) {
-  var parentScope = wrap.Identifier('__parentScope')
-  var scope = wrap.Identifier('__scope')
-  var parScope = wrap.VariableDeclaration([wrap.VariableDeclarator(parentScope, scope)])
-  body.unshift(parScope)
-}
-
-function makeVarContin(parent) {
-  var varDecs = []
-  var info = []
-  var propIndex = {}
-  return { get: join
-         , add: varDecs.push.bind(varDecs)
-         , index: info.push.bind(info)
+module.exports = function convert(node) {
+  var transform
+  var nodeList = {}
+  function collect(node, parentSha) {
+    if (node.phantom) return node.sha = parentSha
+    var h = crypto.createHash('sha1')
+    if (parentSha) h.update(parentSha)
+    h.update(JSON.stringify(node))
+    var sha = h.digest('hex')
+    node.sha = sha
+    node.parent = parentSha
+    nodeList[sha] = node
   }
-  function join(otherProps) {
-    var props =  varDecToScope(wrap.VariableDeclaration(varDecs.reduce(function appendVar(acc, node) {
-      return acc.concat(node.declarations)
-    }, [])), otherProps)
-    info.forEach(function (identifier) {
-      if (propIndex[identifier.name]) propIndex[identifier.name].push(identifier)
-      else if (parent) parent.index(identifier)
+
+  function dispatch(parent, prop, contin, varContin, parentSha) {
+    var node = parent[prop]
+    parentSha = parentSha || parent.sha
+    collect(node, parentSha)
+    return transform[node.type] ? transform[node.type](node, contin, varContin)
+        : continuation(node, contin())
+  }
+
+  function endingContin() {
+    return wrap.Identifier('__end')
+  }
+
+  function continuation(val, func, sha) {
+    sha = sha || val.sha
+    var args = [wrap.Literal(sha), val]
+    if (func != null) args.push(func)
+    return wrap.FunctionExpression(wrap.BlockStatement([
+      wrap.ExpressionStatement(
+        wrap.CallExpression(continId, args))]))
+  }
+
+  function dotChain(arr) {
+    return arr.map(wrap.Identifier).reduce(wrap.MemberExpression)
+  }
+
+  function addParentScope(body) {
+    var parScope = wrap.VariableDeclaration([wrap.VariableDeclarator(pscopeId, scopeId)])
+    body.unshift(parScope)
+  }
+
+  function makeVarContin(scope, parent) {
+    var varDecs = []
+    var info = []
+    var propIndex = {}
+    return { get: join
+           , add: varDecs.push.bind(varDecs)
+           , index: info.push.bind(info)
+    }
+    function join(otherProps) {
+      var props =  varDecToScope(wrap.VariableDeclaration(varDecs.reduce(function appendVar(acc, node) {
+        return acc.concat(node.declarations)
+      }, [])), otherProps)
+      info.forEach(function (identifier) {
+        if (propIndex[identifier.name]) propIndex[identifier.name].push(identifier)
+        else if (parent) parent.index(identifier)
+      })
+      collect(propIndex, scope.sha)
+      var createScopeCall = wrap.CallExpression(createScopeId, [props, pscopeId, wrap.Literal(propIndex.sha)])
+      var dec = wrap.VariableDeclaration([wrap.VariableDeclarator(scopeId, createScopeCall)])
+      return [dec, propIndex]
+    }
+    function varDecToScope(decs, otherProps) {
+      otherProps = otherProps || []
+      var scopeDef = wrap.ObjectExpression(decs.declarations.map(function(dec) {
+        propIndex[dec.id.name] = []
+        // Possibly need to check for dups and make sure the second has no init it doesn't get added
+        return wrap.Property(dec.id, dec.init == null ? undefinedId : dec.init)
+      }).concat(otherProps))
+      otherProps.forEach(function(prop) {
+        propIndex[prop.key.name] = []
+      })
+      return scopeDef
+    }
+  }
+
+  function transformProgram(prog) {
+    collect(prog)
+    nodeList.toplevel = prog
+    var decContin = makeVarContin(prog)
+    var bodyFunc = transformBlockStatement(prog, endingContin, decContin)
+    var stackPush = wrap.CallExpression(pushStackId, [stackId, scopeId])
+    prog = wrap.Program([stackPush, wrap.CallExpression(continuation(bodyFunc, null, prog.sha))].map(wrap.ExpressionStatement))
+    var decs = decContin.get()
+    decs[0].declarations.unshift(wrap.VariableDeclarator(pscopeId, gscopeId))
+    prog.body.unshift(wrap.ExpressionStatement(wrap.AssignmentExpression(pscopeId, scopeId, '=')))
+    prog.body.unshift(decs[0])
+    return prog
+  }
+
+  function transformBlockStatement(block, contin, varContin) {
+    var body = block.body
+    function convertStatement(i) {
+      return i === body.length ? contin()
+          : dispatch(body, i, convertStatement.bind(null, i+1), varContin, block.sha)
+    }
+    return convertStatement(0)
+  }
+
+  function transformVariableDeclaration(varDec, contin, varContin) {
+    // Pass varDecs to varContin
+    // Transform in place Declarations with init into assignment statements
+    varContin.add(varDec)
+    return convertVarDec(0)
+    function convertVarDec(i) {
+      if (i === varDec.declarations.length) return contin()
+      var dec = varDec.declarations[i]
+      if (!dec.init) return convertVarDec(i+1)
+      var assignExp = wrap.AssignmentExpression(dec.id, dec.init, '=')
+      dec.init = null
+      assignExp.phantom = true
+      return dispatch({ phantom: assignExp, sha: varDec.sha }, 'phantom', convertVarDec.bind(null, i+1), varContin)
+    }
+  }
+
+
+  function transformExpressionStatement(exp, contin, varContin) {
+    return dispatch(exp, 'expression', contin, varContin)
+  }
+
+  function transformBinaryExpression(binExp, contin, varContin) {
+    binExp = cloneSha(binExp, wrap.BinaryExpression(binExp.left, binExp.right, binExp.operator))
+    return convertLeft()
+    function convertLeft() {
+      return convertHelper(binExp, 'left', [], convertRight, varContin)
+    }
+    function convertRight(sym) {
+      return convertHelper(binExp, 'right', sym, convertMain, varContin)
+    }
+    function convertMain(sym) {
+      var exp = continuation(binExp, contin())
+      exp.params = sym
+      return exp
+    }
+  }
+
+  function transformCallExpression(callExp, contin, varContin) {
+    callExp = cloneSha(callExp, wrap.CallExpression(callExp.callee, callExp.arguments.slice()))
+    return convertCallee()
+    function convertCallee() {
+      return convertHelper(callExp, 'callee', [], convertArg.bind(null, 0), varContin)
+    }
+    function convertArg(i, param) {
+      return i === callExp.arguments.length ? finish(param)
+          : convertHelper(callExp.arguments, i, param, convertArg.bind(null, i+1), varContin, callExp.sha)
+    }
+    function finish(param) {
+      var exp = wrap.FunctionExpression(wrap.BlockStatement([wrap.ExpressionStatement(callExp)]))
+      exp.params = param
+      callExp.arguments.push(contin())
+      return exp
+    }
+  }
+
+  function convertHelper(subject, prop, defaultVal, contin, varContin, parentSha) {
+    parentSha = parentSha || subject.sha
+    if (!pred.isSimple(subject[prop])) {
+      var sym = gensym()
+      exp = dispatch(subject, prop, contin.bind(null, [sym]), varContin, parentSha)
+      subject[prop] = sym
+      exp.params = defaultVal
+      return exp
+    }
+    else if (pred.isIdentifier(subject[prop])) {
+      subject[prop] = dispatch(subject, prop, contin.bind(null, defaultVal), varContin, parentSha)
+    }
+    return contin(defaultVal)
+  }
+
+  function transformLiteral(simp, contin, varContin) {
+    return continuation(simp, contin())
+  }
+
+  function transformReturnStatement(retSt, contin, varContin) {
+    // Doesn't use contin only calls so that varDecs can be collected that come after return.
+    // because when you get to a return theres nothing after...
+    contin()
+    return retSt.argument == null ? wrapReturn(null)
+        : dispatch(retSt, 'argument', wrapReturn.bind(null, gensym()), varContin)
+  }
+
+  function wrapReturn(val) {
+    var stackPop = wrap.CallExpression(popStackId, [stackId])
+    var retExp = wrap.CallExpression(returnId, val == null ? null : [val])
+    return wrap.FunctionExpression(wrap.BlockStatement(
+      [stackPop, retExp].map(wrap.ExpressionStatement)
+    ), [val])
+  }
+
+  function funcScopeProps(params) {
+    var slice = dotChain(['Array', 'prototype', 'slice', 'call'])
+    var props = params.map(function (param) {
+      return wrap.Property(param, param)
     })
+    props.push(wrap.Property(wrap.Identifier('this'), wrap.ThisExpression))
+    props.push(wrap.Property(argId, wrap.CallExpression(slice, [argId, wrap.Literal(0), wrap.UnaryExpression('-', wrap.Literal(1))])))
     return props
   }
-  function varDecToScope(decs, otherProps) {
-    otherProps = otherProps || []
-    var scopeDef = wrap.ObjectExpression(decs.declarations.map(function(dec) {
-      propIndex[dec.id.name] = []
-      // Possibly need to check for dups and make sure the second has no init it doesn't get added
-      return wrap.Property(dec.id, dec.init == null ? wrap.Identifier('__undefined') : dec.init)
-    }).concat(otherProps))
-    otherProps.forEach(function(prop) {
-      propIndex[prop.key.name] = []
-    })
-    var scope = wrap.CallExpression(wrap.Identifier('__createScopeObject'), [scopeDef, wrap.Identifier('__parentScope')])
-    return wrap.VariableDeclaration([wrap.VariableDeclarator(wrap.Identifier('__scope'), scope)])
+
+  function transformFunctionHelper(func, contin, varContin) {
+    var decContin = makeVarContin(func, varContin)
+    var bodyFunc = dispatch(func, 'body', wrapReturn, decContin)
+    var stackPush = wrap.ExpressionStatement(wrap.CallExpression(pushStackId, [stackId, scopeId]))
+    addParentScope(bodyFunc.body.body)
+    var runBody = wrap.ExpressionStatement(wrap.CallExpression(continuation(bodyFunc, null, func.sha)))
+    var decInfo = decContin.get(funcScopeProps(func.params))
+    func.body = wrap.BlockStatement([decInfo[0], stackPush, runBody ])
+    func.params = func.params.concat(returnId)
+    return func
   }
-}
 
-function transformProgram(prog) {
-  var decContin = makeVarContin()
-  var parentScope = wrap.Identifier('__parentScope')
-  var scope = wrap.Identifier('__scope')
-  var bodyFunc = transformBlockStatement(prog, endingContin, decContin)
-  var stackPush = wrap.CallExpression(dotChain(['__stack', 'push']), [scope])
-  prog.body = [stackPush, wrap.CallExpression(bodyFunc)].map(wrap.ExpressionStatement)
-  var decs = decContin.get()
-  decs.declarations.unshift(wrap.VariableDeclarator(parentScope, wrap.Identifier('__globalScope')))
-  prog.body.unshift(wrap.ExpressionStatement(wrap.AssignmentExpression(parentScope, scope, '=')))
-  prog.body.unshift(decs)
-  return prog
-}
-
-function transformBlockStatement(block, contin, varContin) {
-  var body = block.body
-  function convertStatement(i) {
-    return i === body.length ? contin()
-         : dispatch(body[i], convertStatement.bind(null, i+1), varContin)
+  function transformFunctionExpression(func, contin, varContin) {
+    func = cloneSha(func, wrap.FunctionExpression(func.body, func.params.slice(), func.id))
+    var bodyFunc = transformFunctionHelper(func, contin, varContin)
+    return continuation(bodyFunc, contin(), func.sha)
   }
-  return convertStatement(0)
-}
 
-function transformVariableDeclaration(varDec, contin, varContin) {
-  // Pass varDecs to varContin
-  // Transform in place Declarations with init into assignment statements
-  varContin.add(varDec)
-  return convertVarDec(0)
-  function convertVarDec(i) {
-    if (i === varDec.declarations.length) return contin()
-    var dec = varDec.declarations[i]
-    if (!dec.init) return convertVarDec(i+1)
-    var assignExp = wrap.AssignmentExpression(dec.id, dec.init, '=')
-    dec.init = null
-    return dispatch(assignExp, convertVarDec.bind(null, i+1), varContin)
+  function transformFunctionDeclaration(func, contin, varContin) {
+    func = cloneSha(func, wrap.FunctionExpression(func.body, func.params.slice(), func.id))
+    var bodyFunc = transformFunctionHelper(func, contin, varContin)
+    varContin.add(wrap.VariableDeclaration([wrap.VariableDeclarator(func.id, bodyFunc)]))
+    return contin()
   }
-}
 
-
-function transformExpressionStatement(exp, contin, varContin) {
-  return dispatch(exp.expression, contin, varContin)
-}
-
-function transformBinaryExpression(binExp, contin, varContin) {
-  return convertLeft()
-  function convertLeft() {
-    return convertHelper(binExp, 'left', [], convertRight, varContin)
+  function transformIdentifier(id, contin, varContin) {
+    varContin.index(id)
+    return wrap.MemberExpression(scopeId, id)
   }
-  function convertRight(sym) {
-    return convertHelper(binExp, 'right', sym, convertMain, varContin)
+
+  function transformIfStatement(ifSt, contin, varContin) {
+    var nextSym = gensym()
+    var varDec = wrap.VariableDeclaration([wrap.VariableDeclarator(nextSym, contin())])
+    ifSt = cloneSha(ifSt, wrap.IfStatement(ifSt.test, ifSt.consequent, ifSt.alternate))
+    return convertHelper(ifSt, 'test', [], convertIf, varContin)
+    function getNextContin() {
+      return wrap.FunctionExpression(wrap.BlockStatement([
+        wrap.ExpressionStatement(wrap.CallExpression(nextSym))]))
+    }
+    function convertIf(sym) {
+      ifSt.consequent = wrap.ExpressionStatement(wrap.CallExpression(dispatch(ifSt, 'consequent', getNextContin, varContin)))
+      if (ifSt.alternate) ifSt.alternate = wrap.ExpressionStatement(wrap.CallExpression(dispatch(ifSt, 'alternate', getNextContin, varContin)))
+      return wrap.FunctionExpression(wrap.BlockStatement([varDec, ifSt]), sym)
+    }
   }
-  function convertMain(sym) {
-    var exp = continuation(binExp, contin())
-    exp.params = sym
-    return exp
-  }
+
+  transform = { Identifier: transformIdentifier
+              , Program: transformProgram
+              , BlockStatement: transformBlockStatement
+              , ExpressionStatement: transformExpressionStatement
+              , FunctionExpression: transformFunctionExpression
+              , FunctionDeclaration: transformFunctionDeclaration
+              , CallExpression: transformCallExpression
+              , Literal: transformLiteral
+              , VariableDeclaration: transformVariableDeclaration
+              , BinaryExpression: transformBinaryExpression
+              , AssignmentExpression: transformBinaryExpression
+              , ReturnStatement: transformReturnStatement
+              , IfStatement: transformIfStatement
+              }
+
+  return [transformProgram(node), nodeList]
 }
 
-function transformCallExpression(callExp, contin, varContin) {
-  return convertCallee()
-  function convertCallee() {
-    return convertHelper(callExp, 'callee', [], convertArg.bind(null, 0), varContin)
-  }
-  function convertArg(i, param) {
-    return i === callExp.arguments.length ? finish(param)
-         : convertHelper(callExp.arguments, i, param, convertArg.bind(null, i+1), varContin)
-  }
-  function finish(param) {
-    var exp = wrap.FunctionExpression(wrap.BlockStatement([wrap.ExpressionStatement(callExp)]))
-    exp.params = param
-    callExp.arguments.push(contin())
-    return exp
-  }
-}
-
-function convertHelper(subject, prop, defaultVal, contin, varContin) {
-  if (!pred.isSimple(subject[prop])) {
-    var sym = gensym()
-    exp = dispatch(subject[prop], contin.bind(null, [sym]), varContin)
-    subject[prop] = sym
-    exp.params = defaultVal
-    return exp
-  }
-  else if (pred.isIdentifier(subject[prop])) {
-    subject[prop] = dispatch(subject[prop], contin.bind(null, defaultVal), varContin)
-  }
-  return contin(defaultVal)
-}
-
-function transformLiteral(simp, contin, varContin) {
-  return continuation(simp, contin())
-}
-
-function transformReturnStatement(retSt, contin, varContin) {
-  // Doesn't use contin only calls so that varDecs can be collected that come after return.
-  // because when you get to a return theres nothing after...
-  contin()
-  return retSt.argument == null ? wrapReturn(null)
-       : dispatch(retSt.argument, wrapReturn.bind(null, gensym()), varContin)
-}
-
-function wrapReturn(val) {
-  var stackPop = wrap.CallExpression(dotChain(['__stack', 'pop']))
-  var retExp = wrap.CallExpression(wrap.Identifier('__return'), val == null ? null : [val])
-  return wrap.FunctionExpression(wrap.BlockStatement(
-    [stackPop, retExp].map(wrap.ExpressionStatement)
-  ), [val])
-}
-
-function funcScopeProps(params) {
-  var arg = wrap.Identifier('arguments')
-  var slice = dotChain(['Array', 'prototype', 'slice', 'call'])
-  var props = params.map(function (param) {
-    return wrap.Property(param, param)
-  })
-  props.push(wrap.Property(wrap.Identifier('this'), wrap.ThisExpression))
-  props.push(wrap.Property(arg, wrap.CallExpression(slice, [arg, wrap.Literal(0), wrap.UnaryExpression('-', wrap.Literal(1))])))
-  return props
-}
-
-function transformFunctionHelper(func, contin, varContin) {
-  var decContin = makeVarContin(varContin)
-  var bodyFunc = dispatch(func.body, wrapReturn, decContin)
-  var stackPush = wrap.ExpressionStatement(wrap.CallExpression(dotChain(['__stack', 'push']), [wrap.Identifier('__scope')]))
-  addParentScope(bodyFunc.body.body)
-  var runBody = wrap.ExpressionStatement(wrap.CallExpression(bodyFunc))
-  func.body.body = [ decContin.get(funcScopeProps(func.params)), stackPush, runBody ]
-  func.params = func.params.concat(wrap.Identifier('__return'))
-  return func
-}
-
-function transformFunctionExpression(func, contin, varContin) {
-  var bodyFunc = transformFunctionHelper(func, contin, varContin)
-  return continuation(bodyFunc, contin())
-}
-
-function transformFunctionDeclaration(func, contin, varContin) {
-  func.type = 'FunctionExpression'
-  var bodyFunc = transformFunctionHelper(func, contin, varContin)
-  varContin.add(wrap.VariableDeclaration([wrap.VariableDeclarator(func.id, bodyFunc)]))
-  return contin()
-}
-
-function transformIdentifier(id, contin, varContin) {
-  varContin.index(id)
-  return wrap.MemberExpression(wrap.Identifier('__scope'), id)
-}
-
-function transformIfStatement(ifSt, contin, varContin) {
-  var nextSym = gensym()
-  var varDec = wrap.VariableDeclaration([wrap.VariableDeclarator(nextSym, contin())])
-  return convertHelper(ifSt, 'test', [], convertIf, varContin)
-  function getNextContin() {
-    return wrap.FunctionExpression(wrap.BlockStatement([
-      wrap.ExpressionStatement(wrap.CallExpression(nextSym))]))
-  }
-  function convertIf(sym) {
-    ifSt.consequent = wrap.ExpressionStatement(wrap.CallExpression(dispatch(ifSt.consequent, getNextContin, varContin)))
-    if (ifSt.alternate) ifSt.alternate = wrap.ExpressionStatement(wrap.CallExpression(dispatch(ifSt.alternate, getNextContin, varContin)))
-    return wrap.FunctionExpression(wrap.BlockStatement([varDec, ifSt]), sym)
-  }
-}
-
-transform = { Identifier: transformIdentifier
-            , Program: transformProgram
-            , BlockStatement: transformBlockStatement
-            , ExpressionStatement: transformExpressionStatement
-            , FunctionExpression: transformFunctionExpression
-            , FunctionDeclaration: transformFunctionDeclaration
-            , CallExpression: transformCallExpression
-            , Literal: transformLiteral
-            , VariableDeclaration: transformVariableDeclaration
-            , BinaryExpression: transformBinaryExpression
-            , AssignmentExpression: transformBinaryExpression
-            , ReturnStatement: transformReturnStatement
-            , IfStatement: transformIfStatement
-            , dispatch: dispatch
-            }
-
-module.exports = transform
 
 });
 
@@ -706,8 +749,8 @@ function ExpressionStatement(ast) {
   return { type: 'ExpressionStatement', expression: ast }
 }
 
-function FunctionExpression(ast, params) {
-  return { type: 'FunctionExpression', id: null, params: params || [], body: ast }
+function FunctionExpression(ast, params, id) {
+  return { type: 'FunctionExpression', id: id || null, params: params || [], body: ast }
 }
 
 function CallExpression(ast, args) {
@@ -734,6 +777,10 @@ function AssignmentExpression(left, right, op) {
   return { type: 'AssignmentExpression', operator: op, left: left, right: right }
 }
 
+function BinaryExpression(left, right, op) {
+  return { type: 'BinaryExpression', left: left, right: right, operator: op }
+}
+
 function ReturnStatement(val) {
   return { type: 'ReturnStatement', argument: val }
 }
@@ -758,6 +805,10 @@ function Property(key, val) {
   return { type: 'Property', kind: 'init', key: key, value: val }
 }
 
+function IfStatement(test, consq, alt) {
+  return { type: 'IfStatement', test: test, consequent: consq, alternate: alt || null }
+}
+
 module.exports = { ExpressionStatement: ExpressionStatement
                  , Program: Program
                  , BlockStatement: BlockStatement
@@ -772,13 +823,344 @@ module.exports = { ExpressionStatement: ExpressionStatement
                  , EmptyStatement: { type: "EmptyStatement" }
                  , Literal: Literal
                  , UnaryExpression: UnaryExpression
+                 , BinaryExpression: BinaryExpression
                  , MemberExpression: MemberExpression
                  , ObjectExpression: ObjectExpression
                  , Property: Property
+                 , IfStatement: IfStatement
                  , ThisExpression: { type: "ThisExpression" }
                  }
 
 
+});
+
+require.define("crypto",function(require,module,exports,__dirname,__filename,process,global){module.exports = require("crypto-browserify")
+});
+
+require.define("/node_modules/crypto-browserify/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+});
+
+require.define("/node_modules/crypto-browserify/index.js",function(require,module,exports,__dirname,__filename,process,global){var sha = require('./sha')
+var rng = require('./rng')
+
+var algorithms = {
+  sha1: {
+    hex: sha.hex_sha1,
+    binary: sha.b64_sha1,
+    ascii: sha.str_sha1
+  }
+}
+
+function error () {
+  var m = [].slice.call(arguments).join(' ')
+  throw new Error([
+    m,
+    'we accept pull requests',
+    'http://github.com/dominictarr/crypto-browserify'
+    ].join('\n'))
+}
+
+exports.createHash = function (alg) {
+  alg = alg || 'sha1'
+  if(!algorithms[alg])
+    error('algorithm:', alg, 'is not yet supported')
+  var s = ''
+  var _alg = algorithms[alg]
+  return {
+    update: function (data) {
+      s += data
+      return this
+    },
+    digest: function (enc) {
+      enc = enc || 'binary'
+      var fn
+      if(!(fn = _alg[enc]))
+        error('encoding:', enc , 'is not yet supported for algorithm', alg)
+      var r = fn(s)
+      s = null //not meant to use the hash after you've called digest.
+      return r
+    }
+  }
+}
+
+exports.randomBytes = function(size, callback) {
+  if (callback && callback.call) {
+    try {
+      callback.call(this, undefined, rng(size));
+    } catch (err) { callback(err); }
+  } else {
+    return rng(size);
+  }
+}
+
+// the least I can do is make error messages for the rest of the node.js/crypto api.
+;['createCredentials'
+, 'createHmac'
+, 'createCypher'
+, 'createCypheriv'
+, 'createDecipher'
+, 'createDecipheriv'
+, 'createSign'
+, 'createVerify'
+, 'createDeffieHellman'
+, 'pbkdf2'].forEach(function (name) {
+  exports[name] = function () {
+    error('sorry,', name, 'is not implemented yet')
+  }
+})
+
+});
+
+require.define("/node_modules/crypto-browserify/sha.js",function(require,module,exports,__dirname,__filename,process,global){/*
+ * A JavaScript implementation of the Secure Hash Algorithm, SHA-1, as defined
+ * in FIPS PUB 180-1
+ * Version 2.1a Copyright Paul Johnston 2000 - 2002.
+ * Other contributors: Greg Holt, Andrew Kepert, Ydnar, Lostinet
+ * Distributed under the BSD License
+ * See http://pajhome.org.uk/crypt/md5 for details.
+ */
+
+exports.hex_sha1 = hex_sha1;
+exports.b64_sha1 = b64_sha1;
+exports.str_sha1 = str_sha1;
+exports.hex_hmac_sha1 = hex_hmac_sha1;
+exports.b64_hmac_sha1 = b64_hmac_sha1;
+exports.str_hmac_sha1 = str_hmac_sha1;
+
+/*
+ * Configurable variables. You may need to tweak these to be compatible with
+ * the server-side, but the defaults work in most cases.
+ */
+var hexcase = 0;  /* hex output format. 0 - lowercase; 1 - uppercase        */
+var b64pad  = ""; /* base-64 pad character. "=" for strict RFC compliance   */
+var chrsz   = 8;  /* bits per input character. 8 - ASCII; 16 - Unicode      */
+
+/*
+ * These are the functions you'll usually want to call
+ * They take string arguments and return either hex or base-64 encoded strings
+ */
+function hex_sha1(s){return binb2hex(core_sha1(str2binb(s),s.length * chrsz));}
+function b64_sha1(s){return binb2b64(core_sha1(str2binb(s),s.length * chrsz));}
+function str_sha1(s){return binb2str(core_sha1(str2binb(s),s.length * chrsz));}
+function hex_hmac_sha1(key, data){ return binb2hex(core_hmac_sha1(key, data));}
+function b64_hmac_sha1(key, data){ return binb2b64(core_hmac_sha1(key, data));}
+function str_hmac_sha1(key, data){ return binb2str(core_hmac_sha1(key, data));}
+
+/*
+ * Perform a simple self-test to see if the VM is working
+ */
+function sha1_vm_test()
+{
+  return hex_sha1("abc") == "a9993e364706816aba3e25717850c26c9cd0d89d";
+}
+
+/*
+ * Calculate the SHA-1 of an array of big-endian words, and a bit length
+ */
+function core_sha1(x, len)
+{
+  /* append padding */
+  x[len >> 5] |= 0x80 << (24 - len % 32);
+  x[((len + 64 >> 9) << 4) + 15] = len;
+
+  var w = Array(80);
+  var a =  1732584193;
+  var b = -271733879;
+  var c = -1732584194;
+  var d =  271733878;
+  var e = -1009589776;
+
+  for(var i = 0; i < x.length; i += 16)
+  {
+    var olda = a;
+    var oldb = b;
+    var oldc = c;
+    var oldd = d;
+    var olde = e;
+
+    for(var j = 0; j < 80; j++)
+    {
+      if(j < 16) w[j] = x[i + j];
+      else w[j] = rol(w[j-3] ^ w[j-8] ^ w[j-14] ^ w[j-16], 1);
+      var t = safe_add(safe_add(rol(a, 5), sha1_ft(j, b, c, d)),
+                       safe_add(safe_add(e, w[j]), sha1_kt(j)));
+      e = d;
+      d = c;
+      c = rol(b, 30);
+      b = a;
+      a = t;
+    }
+
+    a = safe_add(a, olda);
+    b = safe_add(b, oldb);
+    c = safe_add(c, oldc);
+    d = safe_add(d, oldd);
+    e = safe_add(e, olde);
+  }
+  return Array(a, b, c, d, e);
+
+}
+
+/*
+ * Perform the appropriate triplet combination function for the current
+ * iteration
+ */
+function sha1_ft(t, b, c, d)
+{
+  if(t < 20) return (b & c) | ((~b) & d);
+  if(t < 40) return b ^ c ^ d;
+  if(t < 60) return (b & c) | (b & d) | (c & d);
+  return b ^ c ^ d;
+}
+
+/*
+ * Determine the appropriate additive constant for the current iteration
+ */
+function sha1_kt(t)
+{
+  return (t < 20) ?  1518500249 : (t < 40) ?  1859775393 :
+         (t < 60) ? -1894007588 : -899497514;
+}
+
+/*
+ * Calculate the HMAC-SHA1 of a key and some data
+ */
+function core_hmac_sha1(key, data)
+{
+  var bkey = str2binb(key);
+  if(bkey.length > 16) bkey = core_sha1(bkey, key.length * chrsz);
+
+  var ipad = Array(16), opad = Array(16);
+  for(var i = 0; i < 16; i++)
+  {
+    ipad[i] = bkey[i] ^ 0x36363636;
+    opad[i] = bkey[i] ^ 0x5C5C5C5C;
+  }
+
+  var hash = core_sha1(ipad.concat(str2binb(data)), 512 + data.length * chrsz);
+  return core_sha1(opad.concat(hash), 512 + 160);
+}
+
+/*
+ * Add integers, wrapping at 2^32. This uses 16-bit operations internally
+ * to work around bugs in some JS interpreters.
+ */
+function safe_add(x, y)
+{
+  var lsw = (x & 0xFFFF) + (y & 0xFFFF);
+  var msw = (x >> 16) + (y >> 16) + (lsw >> 16);
+  return (msw << 16) | (lsw & 0xFFFF);
+}
+
+/*
+ * Bitwise rotate a 32-bit number to the left.
+ */
+function rol(num, cnt)
+{
+  return (num << cnt) | (num >>> (32 - cnt));
+}
+
+/*
+ * Convert an 8-bit or 16-bit string to an array of big-endian words
+ * In 8-bit function, characters >255 have their hi-byte silently ignored.
+ */
+function str2binb(str)
+{
+  var bin = Array();
+  var mask = (1 << chrsz) - 1;
+  for(var i = 0; i < str.length * chrsz; i += chrsz)
+    bin[i>>5] |= (str.charCodeAt(i / chrsz) & mask) << (32 - chrsz - i%32);
+  return bin;
+}
+
+/*
+ * Convert an array of big-endian words to a string
+ */
+function binb2str(bin)
+{
+  var str = "";
+  var mask = (1 << chrsz) - 1;
+  for(var i = 0; i < bin.length * 32; i += chrsz)
+    str += String.fromCharCode((bin[i>>5] >>> (32 - chrsz - i%32)) & mask);
+  return str;
+}
+
+/*
+ * Convert an array of big-endian words to a hex string.
+ */
+function binb2hex(binarray)
+{
+  var hex_tab = hexcase ? "0123456789ABCDEF" : "0123456789abcdef";
+  var str = "";
+  for(var i = 0; i < binarray.length * 4; i++)
+  {
+    str += hex_tab.charAt((binarray[i>>2] >> ((3 - i%4)*8+4)) & 0xF) +
+           hex_tab.charAt((binarray[i>>2] >> ((3 - i%4)*8  )) & 0xF);
+  }
+  return str;
+}
+
+/*
+ * Convert an array of big-endian words to a base-64 string
+ */
+function binb2b64(binarray)
+{
+  var tab = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  var str = "";
+  for(var i = 0; i < binarray.length * 4; i += 3)
+  {
+    var triplet = (((binarray[i   >> 2] >> 8 * (3 -  i   %4)) & 0xFF) << 16)
+                | (((binarray[i+1 >> 2] >> 8 * (3 - (i+1)%4)) & 0xFF) << 8 )
+                |  ((binarray[i+2 >> 2] >> 8 * (3 - (i+2)%4)) & 0xFF);
+    for(var j = 0; j < 4; j++)
+    {
+      if(i * 8 + j * 6 > binarray.length * 32) str += b64pad;
+      else str += tab.charAt((triplet >> 6*(3-j)) & 0x3F);
+    }
+  }
+  return str;
+}
+
+
+});
+
+require.define("/node_modules/crypto-browserify/rng.js",function(require,module,exports,__dirname,__filename,process,global){// Original code adapted from Robert Kieffer.
+// details at https://github.com/broofa/node-uuid
+(function() {
+  var _global = this;
+
+  var mathRNG, whatwgRNG;
+
+  // NOTE: Math.random() does not guarantee "cryptographic quality"
+  mathRNG = function(size) {
+    var bytes = new Array(size);
+    var r;
+
+    for (var i = 0, r; i < size; i++) {
+      if ((i & 0x03) == 0) r = Math.random() * 0x100000000;
+      bytes[i] = r >>> ((i & 0x03) << 3) & 0xff;
+    }
+
+    return bytes;
+  }
+
+  // currently only available in webkit-based browsers.
+  if (_global.crypto && crypto.getRandomValues) {
+    var _rnds = new Uint32Array(4);
+    whatwgRNG = function(size) {
+      var bytes = new Array(size);
+      crypto.getRandomValues(_rnds);
+
+      for (var c = 0 ; c < size; c++) {
+        bytes[c] = _rnds[c >> 2] >>> ((c & 0x03) * 8) & 0xff;
+      }
+      return bytes;
+    }
+  }
+
+  module.exports = whatwgRNG || mathRNG;
+
+}())
 });
 
 require.define("/stepper/node_modules/esprima/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"esprima.js"}
@@ -6523,335 +6905,6 @@ createMemProxy.Scope = createScopeObject
 
 });
 
-require.define("crypto",function(require,module,exports,__dirname,__filename,process,global){module.exports = require("crypto-browserify")
-});
-
-require.define("/node_modules/crypto-browserify/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
-});
-
-require.define("/node_modules/crypto-browserify/index.js",function(require,module,exports,__dirname,__filename,process,global){var sha = require('./sha')
-var rng = require('./rng')
-
-var algorithms = {
-  sha1: {
-    hex: sha.hex_sha1,
-    binary: sha.b64_sha1,
-    ascii: sha.str_sha1
-  }
-}
-
-function error () {
-  var m = [].slice.call(arguments).join(' ')
-  throw new Error([
-    m,
-    'we accept pull requests',
-    'http://github.com/dominictarr/crypto-browserify'
-    ].join('\n'))
-}
-
-exports.createHash = function (alg) {
-  alg = alg || 'sha1'
-  if(!algorithms[alg])
-    error('algorithm:', alg, 'is not yet supported')
-  var s = ''
-  var _alg = algorithms[alg]
-  return {
-    update: function (data) {
-      s += data
-      return this
-    },
-    digest: function (enc) {
-      enc = enc || 'binary'
-      var fn
-      if(!(fn = _alg[enc]))
-        error('encoding:', enc , 'is not yet supported for algorithm', alg)
-      var r = fn(s)
-      s = null //not meant to use the hash after you've called digest.
-      return r
-    }
-  }
-}
-
-exports.randomBytes = function(size, callback) {
-  if (callback && callback.call) {
-    try {
-      callback.call(this, undefined, rng(size));
-    } catch (err) { callback(err); }
-  } else {
-    return rng(size);
-  }
-}
-
-// the least I can do is make error messages for the rest of the node.js/crypto api.
-;['createCredentials'
-, 'createHmac'
-, 'createCypher'
-, 'createCypheriv'
-, 'createDecipher'
-, 'createDecipheriv'
-, 'createSign'
-, 'createVerify'
-, 'createDeffieHellman'
-, 'pbkdf2'].forEach(function (name) {
-  exports[name] = function () {
-    error('sorry,', name, 'is not implemented yet')
-  }
-})
-
-});
-
-require.define("/node_modules/crypto-browserify/sha.js",function(require,module,exports,__dirname,__filename,process,global){/*
- * A JavaScript implementation of the Secure Hash Algorithm, SHA-1, as defined
- * in FIPS PUB 180-1
- * Version 2.1a Copyright Paul Johnston 2000 - 2002.
- * Other contributors: Greg Holt, Andrew Kepert, Ydnar, Lostinet
- * Distributed under the BSD License
- * See http://pajhome.org.uk/crypt/md5 for details.
- */
-
-exports.hex_sha1 = hex_sha1;
-exports.b64_sha1 = b64_sha1;
-exports.str_sha1 = str_sha1;
-exports.hex_hmac_sha1 = hex_hmac_sha1;
-exports.b64_hmac_sha1 = b64_hmac_sha1;
-exports.str_hmac_sha1 = str_hmac_sha1;
-
-/*
- * Configurable variables. You may need to tweak these to be compatible with
- * the server-side, but the defaults work in most cases.
- */
-var hexcase = 0;  /* hex output format. 0 - lowercase; 1 - uppercase        */
-var b64pad  = ""; /* base-64 pad character. "=" for strict RFC compliance   */
-var chrsz   = 8;  /* bits per input character. 8 - ASCII; 16 - Unicode      */
-
-/*
- * These are the functions you'll usually want to call
- * They take string arguments and return either hex or base-64 encoded strings
- */
-function hex_sha1(s){return binb2hex(core_sha1(str2binb(s),s.length * chrsz));}
-function b64_sha1(s){return binb2b64(core_sha1(str2binb(s),s.length * chrsz));}
-function str_sha1(s){return binb2str(core_sha1(str2binb(s),s.length * chrsz));}
-function hex_hmac_sha1(key, data){ return binb2hex(core_hmac_sha1(key, data));}
-function b64_hmac_sha1(key, data){ return binb2b64(core_hmac_sha1(key, data));}
-function str_hmac_sha1(key, data){ return binb2str(core_hmac_sha1(key, data));}
-
-/*
- * Perform a simple self-test to see if the VM is working
- */
-function sha1_vm_test()
-{
-  return hex_sha1("abc") == "a9993e364706816aba3e25717850c26c9cd0d89d";
-}
-
-/*
- * Calculate the SHA-1 of an array of big-endian words, and a bit length
- */
-function core_sha1(x, len)
-{
-  /* append padding */
-  x[len >> 5] |= 0x80 << (24 - len % 32);
-  x[((len + 64 >> 9) << 4) + 15] = len;
-
-  var w = Array(80);
-  var a =  1732584193;
-  var b = -271733879;
-  var c = -1732584194;
-  var d =  271733878;
-  var e = -1009589776;
-
-  for(var i = 0; i < x.length; i += 16)
-  {
-    var olda = a;
-    var oldb = b;
-    var oldc = c;
-    var oldd = d;
-    var olde = e;
-
-    for(var j = 0; j < 80; j++)
-    {
-      if(j < 16) w[j] = x[i + j];
-      else w[j] = rol(w[j-3] ^ w[j-8] ^ w[j-14] ^ w[j-16], 1);
-      var t = safe_add(safe_add(rol(a, 5), sha1_ft(j, b, c, d)),
-                       safe_add(safe_add(e, w[j]), sha1_kt(j)));
-      e = d;
-      d = c;
-      c = rol(b, 30);
-      b = a;
-      a = t;
-    }
-
-    a = safe_add(a, olda);
-    b = safe_add(b, oldb);
-    c = safe_add(c, oldc);
-    d = safe_add(d, oldd);
-    e = safe_add(e, olde);
-  }
-  return Array(a, b, c, d, e);
-
-}
-
-/*
- * Perform the appropriate triplet combination function for the current
- * iteration
- */
-function sha1_ft(t, b, c, d)
-{
-  if(t < 20) return (b & c) | ((~b) & d);
-  if(t < 40) return b ^ c ^ d;
-  if(t < 60) return (b & c) | (b & d) | (c & d);
-  return b ^ c ^ d;
-}
-
-/*
- * Determine the appropriate additive constant for the current iteration
- */
-function sha1_kt(t)
-{
-  return (t < 20) ?  1518500249 : (t < 40) ?  1859775393 :
-         (t < 60) ? -1894007588 : -899497514;
-}
-
-/*
- * Calculate the HMAC-SHA1 of a key and some data
- */
-function core_hmac_sha1(key, data)
-{
-  var bkey = str2binb(key);
-  if(bkey.length > 16) bkey = core_sha1(bkey, key.length * chrsz);
-
-  var ipad = Array(16), opad = Array(16);
-  for(var i = 0; i < 16; i++)
-  {
-    ipad[i] = bkey[i] ^ 0x36363636;
-    opad[i] = bkey[i] ^ 0x5C5C5C5C;
-  }
-
-  var hash = core_sha1(ipad.concat(str2binb(data)), 512 + data.length * chrsz);
-  return core_sha1(opad.concat(hash), 512 + 160);
-}
-
-/*
- * Add integers, wrapping at 2^32. This uses 16-bit operations internally
- * to work around bugs in some JS interpreters.
- */
-function safe_add(x, y)
-{
-  var lsw = (x & 0xFFFF) + (y & 0xFFFF);
-  var msw = (x >> 16) + (y >> 16) + (lsw >> 16);
-  return (msw << 16) | (lsw & 0xFFFF);
-}
-
-/*
- * Bitwise rotate a 32-bit number to the left.
- */
-function rol(num, cnt)
-{
-  return (num << cnt) | (num >>> (32 - cnt));
-}
-
-/*
- * Convert an 8-bit or 16-bit string to an array of big-endian words
- * In 8-bit function, characters >255 have their hi-byte silently ignored.
- */
-function str2binb(str)
-{
-  var bin = Array();
-  var mask = (1 << chrsz) - 1;
-  for(var i = 0; i < str.length * chrsz; i += chrsz)
-    bin[i>>5] |= (str.charCodeAt(i / chrsz) & mask) << (32 - chrsz - i%32);
-  return bin;
-}
-
-/*
- * Convert an array of big-endian words to a string
- */
-function binb2str(bin)
-{
-  var str = "";
-  var mask = (1 << chrsz) - 1;
-  for(var i = 0; i < bin.length * 32; i += chrsz)
-    str += String.fromCharCode((bin[i>>5] >>> (32 - chrsz - i%32)) & mask);
-  return str;
-}
-
-/*
- * Convert an array of big-endian words to a hex string.
- */
-function binb2hex(binarray)
-{
-  var hex_tab = hexcase ? "0123456789ABCDEF" : "0123456789abcdef";
-  var str = "";
-  for(var i = 0; i < binarray.length * 4; i++)
-  {
-    str += hex_tab.charAt((binarray[i>>2] >> ((3 - i%4)*8+4)) & 0xF) +
-           hex_tab.charAt((binarray[i>>2] >> ((3 - i%4)*8  )) & 0xF);
-  }
-  return str;
-}
-
-/*
- * Convert an array of big-endian words to a base-64 string
- */
-function binb2b64(binarray)
-{
-  var tab = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  var str = "";
-  for(var i = 0; i < binarray.length * 4; i += 3)
-  {
-    var triplet = (((binarray[i   >> 2] >> 8 * (3 -  i   %4)) & 0xFF) << 16)
-                | (((binarray[i+1 >> 2] >> 8 * (3 - (i+1)%4)) & 0xFF) << 8 )
-                |  ((binarray[i+2 >> 2] >> 8 * (3 - (i+2)%4)) & 0xFF);
-    for(var j = 0; j < 4; j++)
-    {
-      if(i * 8 + j * 6 > binarray.length * 32) str += b64pad;
-      else str += tab.charAt((triplet >> 6*(3-j)) & 0x3F);
-    }
-  }
-  return str;
-}
-
-
-});
-
-require.define("/node_modules/crypto-browserify/rng.js",function(require,module,exports,__dirname,__filename,process,global){// Original code adapted from Robert Kieffer.
-// details at https://github.com/broofa/node-uuid
-(function() {
-  var _global = this;
-
-  var mathRNG, whatwgRNG;
-
-  // NOTE: Math.random() does not guarantee "cryptographic quality"
-  mathRNG = function(size) {
-    var bytes = new Array(size);
-    var r;
-
-    for (var i = 0, r; i < size; i++) {
-      if ((i & 0x03) == 0) r = Math.random() * 0x100000000;
-      bytes[i] = r >>> ((i & 0x03) << 3) & 0xff;
-    }
-
-    return bytes;
-  }
-
-  // currently only available in webkit-based browsers.
-  if (_global.crypto && crypto.getRandomValues) {
-    var _rnds = new Uint32Array(4);
-    whatwgRNG = function(size) {
-      var bytes = new Array(size);
-      crypto.getRandomValues(_rnds);
-
-      for (var c = 0 ; c < size; c++) {
-        bytes[c] = _rnds[c >> 2] >>> ((c & 0x03) * 8) & 0xff;
-      }
-      return bytes;
-    }
-  }
-
-  module.exports = whatwgRNG || mathRNG;
-
-}())
-});
-
 require.define("events",function(require,module,exports,__dirname,__filename,process,global){if (!process.EventEmitter) process.EventEmitter = function () {};
 
 var EventEmitter = exports.EventEmitter = process.EventEmitter;
@@ -7032,23 +7085,33 @@ var escodegen = require('escodegen').generate
 var Memory = require('../memory-tree/memoryProxy')
 var EventEmitter = require('events').EventEmitter
 
-function run(str) {
+window.run = function run(str) {
   var __undefined
   var scopeInfoMap = new WeakMap()
   var globalScopeInfo = Memory.Scope({ a: 1, b: 2}, Memory({}))
   var __globalScope = globalScopeInfo[0]
   var __stack = []
   var emitter = new EventEmitter()
-  var ast = convert(esprima(str, { loc: true, range: true }))
-  var code = escodegen(ast)
+  var ast = convert(esprima(str, { loc: true }))
+  console.log(ast[1].toplevel)
+  var code = escodegen(ast[0])
 
   emitter.next = function () { eval(code) }
   scopeInfoMap.set(__globalScope, globalScopeInfo)
   globalScopeInfo.viewAll = true
 
-  function __createScopeObject(scopeDef, parentScope) {
+  function __pushStack(stack, scope) {
+    stack.push(scopeInfoMap.get(scope))
+  }
+
+  function __popStack(stack) {
+    stack.pop()
+  }
+
+  function __createScopeObject(scopeDef, parentScope, scopeIndexSha) {
     var parentScopeInfo = scopeInfoMap.get(parentScope)
     var scopeInfo = Memory.Scope(scopeDef, parentScopeInfo)
+    console.log(scopeIndexSha, ast[1][scopeIndexSha])
     scopeInfo[1].viewAll = true
     scopeInfoMap.set(scopeInfo[0], scopeInfo)
     return scopeInfo[0]
@@ -7060,8 +7123,9 @@ function run(str) {
     emitter.emit('end', __stack)
   }
 
-  function __continuation(val, cb) {
-    if (arguments.length === 1) cb = val,val=null;
+  function __continuation(curSha, val, cb) {
+    console.log(curSha, ast[1][curSha])
+    if (arguments.length === 2) cb = val,val=null;
     var curScope = __stack[__stack.length - 1]
     emitter.emit('tick', __stack)
     emitter.next = cb.bind(null, val)
@@ -7069,7 +7133,6 @@ function run(str) {
 
   return emitter
 }
-window.run = run
 
 });
 require("/stepper/walker.js");

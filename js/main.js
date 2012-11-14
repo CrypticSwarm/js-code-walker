@@ -90,13 +90,13 @@ function update(data) {
     
 
   nodeGroup.append("rect")
-    .attr("height", function (d) { return Object.keys(d[0]).length * 20 })
+    .attr("height", function (d) { return Object.keys(d[0][0]).length * 20 })
     .attr("width", 225)
     .attr('x', -100)
     .attr('y', 1)
 
   nodeGroup.selectAll("text.props")
-    .data(function (d, i) { return Object.keys(d[0]).map(function(key) { return [key, d[0][key]] }) })
+    .data(function (d, i) { return Object.keys(d[0][0]).map(function(key) { return [key, d[0][0][key]] }) })
     .enter().append("text")
     .attr("class", 'props')
     .attr("dx", -90)

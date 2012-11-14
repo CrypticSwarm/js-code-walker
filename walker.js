@@ -11,16 +11,26 @@ function run(str) {
   var __globalScope = globalScopeInfo[0]
   var __stack = []
   var emitter = new EventEmitter()
-  var ast = convert(esprima(str, { loc: true, range: true }))
-  var code = escodegen(ast)
+  var ast = convert(esprima(str, { loc: true }))
+  console.log(ast[1].toplevel)
+  var code = escodegen(ast[0])
 
   emitter.next = function () { eval(code) }
   scopeInfoMap.set(__globalScope, globalScopeInfo)
   globalScopeInfo.viewAll = true
 
-  function __createScopeObject(scopeDef, parentScope) {
+  function __pushStack(stack, scope) {
+    stack.push(scopeInfoMap.get(scope))
+  }
+
+  function __popStack(stack) {
+    stack.pop()
+  }
+
+  function __createScopeObject(scopeDef, parentScope, scopeIndexSha) {
     var parentScopeInfo = scopeInfoMap.get(parentScope)
     var scopeInfo = Memory.Scope(scopeDef, parentScopeInfo)
+    console.log(scopeIndexSha, ast[1][scopeIndexSha])
     scopeInfo[1].viewAll = true
     scopeInfoMap.set(scopeInfo[0], scopeInfo)
     return scopeInfo[0]
@@ -32,8 +42,9 @@ function run(str) {
     emitter.emit('end', __stack)
   }
 
-  function __continuation(val, cb) {
-    if (arguments.length === 1) cb = val,val=null;
+  function __continuation(curSha, val, cb) {
+    console.log(curSha, ast[1][curSha])
+    if (arguments.length === 2) cb = val,val=null;
     var curScope = __stack[__stack.length - 1]
     emitter.emit('tick', __stack)
     emitter.next = cb.bind(null, val)
