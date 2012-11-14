@@ -80,7 +80,7 @@ ace.require(['ace/range'], function(a) {
   function update(data, valInfo, curSha, shaList) {
     vis.selectAll("path.link").remove()
     vis.selectAll("g.node").remove()
-    if (data.length === 0) return console.log('returning')
+    if (data.length === 0) return
 
     if (curExpressionMarker) removeMarker(curExpressionMarker)
     curExpressionMarker = setMarker(curSha, shaList, 'curExpression')
