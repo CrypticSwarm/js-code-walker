@@ -8,6 +8,7 @@ ace.require(['ace/range'], function(a) {
   var next = $('#next')
   var prev = $('#prev')
   var prog
+  var curExpressionMarker
 
   next.click(function () {
     if (next.hasClass('disabled')) return
@@ -23,10 +24,12 @@ ace.require(['ace/range'], function(a) {
     prog = run(code, 14)
     prog.on('tick', update)
     prog.on('end', enableCode)
+    prog.next()
   })
   stop.click(enableCode)
   function enableCode() {
     if (stop.hasClass('disabled')) return
+    if (curExpressionMarker) removeMarker(curExpressionMarker)
     stop.addClass('disabled')
     next.addClass('disabled')
     start.removeClass('disabled')
@@ -58,10 +61,26 @@ ace.require(['ace/range'], function(a) {
     return '[Function' + name + ']'
   }
 
-  function update(data) {
+  function setMarker(sha, shaList, type) {
+    var exp = shaList[sha]
+    var start = exp.loc.start
+    var end = exp.loc.end
+    var range = new a.Range(start.line - 1, start.column, end.line - 1, end.column);
+    var marker = editor.getSession().addMarker(range, type, "text");
+    return marker
+  }
+
+  function removeMarker(marker) {
+    editor.getSession().removeMarker(marker);
+  }
+
+  function update(data, curSha, shaList) {
     vis.selectAll("path.link").remove()
     vis.selectAll("g.node").remove()
     if (data.length === 0) return console.log('returning')
+
+    if (curExpressionMarker) removeMarker(curExpressionMarker)
+    curExpressionMarker = setMarker(curSha, shaList, 'curExpression')
 
     var nodes = tree.nodes(data);
 
@@ -112,16 +131,14 @@ ace.require(['ace/range'], function(a) {
           var start = ident.loc.start
           var end = ident.loc.end
           var range = new a.Range(start.line - 1, start.column, end.line - 1, end.column);
-          var marker = editor.getSession().addMarker(range,"ace_selected_word", "text");
+          var marker = editor.getSession().addMarker(range,"scopedVariableFinder", "text");
           markList.push(marker)
         })
       })
       .on('mouseout', function(d) {
         var marks = d.progInfo[d.scopeMeta.index].__marks
         if (!marks[d.key]) return
-        marks[d.key].forEach(function(marker) {
-          editor.getSession().removeMarker(marker);
-        })
+        marks[d.key].forEach(removeMarker)
         marks[d.key] = []
       })
       .text(function(d) {

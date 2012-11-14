@@ -39,8 +39,15 @@ body {
   overflow-y: auto;
 }
 
-.ace_marker-layer .ace_selected_word {
+.ace_marker-layer .scopedVariableFinder {
+  position: absolute;
+  z-index: 6;
+  background-color: blue;
+  opacity: .4;
+}
+.ace_marker-layer .curExpression {
   position: absolute;
   z-index: 5;
   background-color: green;
+  opacity: .4;
 }

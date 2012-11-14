@@ -47,7 +47,7 @@ function run(str) {
   function __continuation(curSha, val, cb) {
     if (arguments.length === 2) cb = val,val=null;
     var curScope = __stack[__stack.length - 1]
-    emitter.emit('tick', __stack)
+    emitter.emit('tick', __stack, curSha, ast[1])
     emitter.next = cb.bind(null, val)
   }
 

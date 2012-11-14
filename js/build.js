@@ -438,9 +438,10 @@ function cloneSha(node, clone) {
 module.exports = function convert(node) {
   var transform
   var nodeList = {}
-  function collect(node, parentSha) {
+  function collect(node, parentProp, parentSha) {
     if (node.phantom) return node.sha = parentSha
     var h = crypto.createHash('sha1')
+    if (parentProp) h.update(parentProp)
     if (parentSha) h.update(parentSha)
     h.update(JSON.stringify(node))
     var sha = h.digest('hex')
@@ -452,7 +453,7 @@ module.exports = function convert(node) {
   function dispatch(parent, prop, contin, varContin, parentSha) {
     var node = parent[prop]
     parentSha = parentSha || parent.sha
-    collect(node, parentSha)
+    collect(node, prop, parentSha)
     return transform[node.type] ? transform[node.type](node, contin, varContin)
         : continuation(node, contin())
   }
@@ -585,9 +586,11 @@ module.exports = function convert(node) {
           : convertHelper(callExp.arguments, i, param, convertArg.bind(null, i+1), varContin, callExp.sha)
     }
     function finish(param) {
-      var exp = wrap.FunctionExpression(wrap.BlockStatement([wrap.ExpressionStatement(callExp)]))
+      var nextSym = gensym()
+      var varDec = wrap.VariableDeclaration([wrap.VariableDeclarator(nextSym, contin())])
+      var exp = wrap.FunctionExpression(wrap.BlockStatement([varDec, wrap.ExpressionStatement(callExp)]))
       exp.params = param
-      callExp.arguments.push(contin())
+      callExp.arguments.push(nextSym)
       return exp
     }
   }
@@ -7130,7 +7133,7 @@ window.run = function run(str) {
   function __continuation(curSha, val, cb) {
     if (arguments.length === 2) cb = val,val=null;
     var curScope = __stack[__stack.length - 1]
-    emitter.emit('tick', __stack)
+    emitter.emit('tick', __stack, curSha, ast[1])
     emitter.next = cb.bind(null, val)
   }
 
