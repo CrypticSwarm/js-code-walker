@@ -546,11 +546,12 @@ module.exports = function convert(node) {
     function convertVarDec(i) {
       if (i === varDec.declarations.length) return contin()
       var dec = varDec.declarations[i]
+      collect(dec, i, varDec.sha)
       if (!dec.init) return convertVarDec(i+1)
       var assignExp = wrap.AssignmentExpression(dec.id, dec.init, '=')
       dec.init = null
       assignExp.phantom = true
-      return dispatch({ phantom: assignExp, sha: varDec.sha }, 'phantom', convertVarDec.bind(null, i+1), varContin)
+      return dispatch({ phantom: assignExp, sha: dec.sha }, 'phantom', convertVarDec.bind(null, i+1), varContin)
     }
   }
 
@@ -589,6 +590,7 @@ module.exports = function convert(node) {
       var nextSym = gensym()
       var varDec = wrap.VariableDeclaration([wrap.VariableDeclarator(nextSym, contin())])
       var exp = wrap.FunctionExpression(wrap.BlockStatement([varDec, wrap.ExpressionStatement(callExp)]))
+      exp = continuation(exp, null, callExp.sha)
       exp.params = param
       callExp.arguments.push(nextSym)
       return exp
