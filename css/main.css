@@ -51,3 +51,10 @@ body {
   background-color: green;
   opacity: .4;
 }
+#curExpressionInfo {
+  padding-top: 10px;
+}
+
+.hidden {
+  display: none;
+}

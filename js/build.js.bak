@@ -7090,7 +7090,7 @@ var escodegen = require('escodegen').generate
 var Memory = require('../memory-tree/memoryProxy')
 var EventEmitter = require('events').EventEmitter
 
-window.run = function run(str) {
+function run(str) {
   var __undefined
   var scopeInfoMap = new WeakMap()
   var globalScopeInfo = Memory.Scope({ a: 1, b: 2}, Memory({}))

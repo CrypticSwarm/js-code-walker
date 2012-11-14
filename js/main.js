@@ -7,6 +7,7 @@ ace.require(['ace/range'], function(a) {
   var stop = d3.select('#stop')
   var next = d3.select('#next')
   var prev = d3.select('#prev')
+  var curExpressionInfo = d3.select('#curExpressionInfo')
   var prog
   var curExpressionMarker
 
@@ -30,6 +31,7 @@ ace.require(['ace/range'], function(a) {
   stop.on('click', enableCode)
   function enableCode() {
     if (curExpressionMarker) removeMarker(curExpressionMarker)
+    curExpressionInfo.classed('hidden', true)
     stop.classed('disabled', true)
     next.classed('disabled', true)
     start.classed('disabled', false)
@@ -75,13 +77,22 @@ ace.require(['ace/range'], function(a) {
     editor.getSession().removeMarker(marker)
   }
 
-  function update(data, curSha, shaList) {
+  function update(data, valInfo, curSha, shaList) {
     vis.selectAll("path.link").remove()
     vis.selectAll("g.node").remove()
     if (data.length === 0) return console.log('returning')
 
     if (curExpressionMarker) removeMarker(curExpressionMarker)
     curExpressionMarker = setMarker(curSha, shaList, 'curExpression')
+
+    curExpressionInfo.classed('hidden', false).select('.expType').text(shaList[curSha].type)
+
+    var value = 'No Value'
+    if (valInfo.hasVal) {
+      if (typeof valInfo.value === 'function') value = prettyprintFunction(valInfo.value)
+      else value = valInfo.value
+    }
+    curExpressionInfo.select('.expVal').text(value)
 
     var nodes = tree.nodes(data)
 
