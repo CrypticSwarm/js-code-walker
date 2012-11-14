@@ -441,7 +441,7 @@ module.exports = function convert(node) {
   function collect(node, parentProp, parentSha) {
     if (node.phantom) return node.sha = parentSha
     var h = crypto.createHash('sha1')
-    if (parentProp) h.update(parentProp)
+    if (parentProp != null) h.update('' + parentProp)
     if (parentSha) h.update(parentSha)
     h.update(JSON.stringify(node))
     var sha = h.digest('hex')
