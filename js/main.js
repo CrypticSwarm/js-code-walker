@@ -1,24 +1,24 @@
 ace.require(['ace/range'], function(a) {
   var Range = a.Range
   var code = 'function add(a, b) { return a + b }\nfunction makeAdder(a){\n\treturn function plus(b) {\n\t\treturn add(a, b)\n\t}\n}\nvar add1 = makeAdder(1)\nvar add2 = makeAdder(2)\nadd1(5) + add2(6);'
-  $('#editor').html(code)
+  d3.select('#editor').html(code)
 
-  var start = $('#start')
-  var stop = $('#stop')
-  var next = $('#next')
-  var prev = $('#prev')
+  var start = d3.select('#start')
+  var stop = d3.select('#stop')
+  var next = d3.select('#next')
+  var prev = d3.select('#prev')
   var prog
   var curExpressionMarker
 
-  next.click(function () {
-    if (next.hasClass('disabled')) return
-    prog.next()
+  next.on('click', function () {
+    if (prog) prog.next()
   })
-  start.click(function () {
-    if (start.hasClass('disabled')) return
-    start.addClass('disabled')
-    next.removeClass('disabled')
-    stop.removeClass('disabled')
+
+  start.on('click', function () {
+    if (prog != null) return
+    start.classed('disabled', true)
+    next.classed('disabled', false)
+    stop.classed('disabled', false)
     var code = editor.getSession().getValue()
     editor.setReadOnly(true)
     prog = run(code, 14)
@@ -26,14 +26,15 @@ ace.require(['ace/range'], function(a) {
     prog.on('end', enableCode)
     prog.next()
   })
-  stop.click(enableCode)
+
+  stop.on('click', enableCode)
   function enableCode() {
-    if (stop.hasClass('disabled')) return
     if (curExpressionMarker) removeMarker(curExpressionMarker)
-    stop.addClass('disabled')
-    next.addClass('disabled')
-    start.removeClass('disabled')
+    stop.classed('disabled', true)
+    next.classed('disabled', true)
+    start.classed('disabled', false)
     editor.setReadOnly(false)
+    prog = null
   }
 
   var editor = ace.edit("editor");
