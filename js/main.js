@@ -104,6 +104,7 @@ ace.require(['ace/range'], function(a) {
       .attr("d", diagonal)
     }
 
+
     var node = vis.selectAll("g.node")
       .data(nodes)
 
@@ -115,10 +116,37 @@ ace.require(['ace/range'], function(a) {
       
 
     nodeGroup.append("rect")
+      .attr("width", 225)
+      .attr('height', 20)
+      .attr('x', -100)
+      .attr('y', 1)
+      .attr('rx', 10)
+      .attr('ry', 10)
+
+    nodeGroup.append('text')
+      .attr('dx', 0)
+      .attr('dy', 14)
+      .attr("text-anchor", "middle")
+      .text(function (d) {
+        var progInfo = d[0].progInfo
+        var funcInfo = progInfo[progInfo[d[0].scopeMeta.index].parent]
+        var callInfo = d[0].callInfo
+        if (funcInfo.type === 'Program') return 'Global'
+        var call = callInfo.callee
+        var funcName = funcInfo.id && funcInfo.id.name || prettyprintFunction(funcInfo)
+        var callName = call.type === 'Identifier' ? call.name
+            : call.id && call.id.name || prettyprintFunction(funcInfo)
+        return funcName === callName ? funcName
+             : funcName + ' As ' + callName
+      })
+
+    nodeGroup.append("rect")
       .attr("height", function (d) { return Object.keys(d[0].scope).length * 20 })
       .attr("width", 225)
       .attr('x', -100)
-      .attr('y', 1)
+      .attr('y', 23)
+      .attr('rx', 10)
+      .attr('ry', 10)
 
     nodeGroup.selectAll("text.props")
       .data(function (d, i) { 
@@ -133,7 +161,7 @@ ace.require(['ace/range'], function(a) {
       .enter().append("text")
       .attr("class", 'props')
       .attr("dx", -90)
-      .attr("dy", function (d, i) { return i * 20 + 14 })
+      .attr("dy", function (d, i) { return i * 20 + 36 })
       .attr("text-anchor", "before")
       .on('mouseover', function (d) {
         var scopeIndex = d.progInfo[d.scopeMeta.index]

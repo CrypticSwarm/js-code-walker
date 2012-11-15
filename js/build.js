@@ -419,6 +419,7 @@ var pushStackId = wrap.Identifier('__pushStack')
 var popStackId = wrap.Identifier('__popStack')
 var undefinedId = wrap.Identifier('__undefined') 
 var returnId = wrap.Identifier('__return')
+var callInfoId = wrap.Identifier('__callInfo')
 var argId = wrap.Identifier('arguments')
 
 var gensym = (function () {
@@ -497,6 +498,7 @@ module.exports = function convert(node) {
         else if (parent) parent.index(identifier)
       })
       collect(propIndex, scope.sha)
+      propIndex.parent = scope.sha
       var createScopeCall = wrap.CallExpression(createScopeId, [props, pscopeId, wrap.Literal(propIndex.sha)])
       var dec = wrap.VariableDeclaration([wrap.VariableDeclarator(scopeId, createScopeCall)])
       return [dec, propIndex]
@@ -592,7 +594,11 @@ module.exports = function convert(node) {
       var exp = wrap.FunctionExpression(wrap.BlockStatement([varDec, wrap.ExpressionStatement(callExp)]))
       exp = continuation(exp, null, callExp.sha)
       exp.params = param
-      callExp.arguments.push(nextSym)
+      var callInfo = wrap.ObjectExpression([
+        wrap.Property(returnId, nextSym),
+        wrap.Property(callInfoId, wrap.Literal(callExp.sha))
+      ])
+      callExp.arguments.push(callInfo)
       return exp
     }
   }
@@ -626,7 +632,7 @@ module.exports = function convert(node) {
 
   function wrapReturn(val) {
     var stackPop = wrap.CallExpression(popStackId, [stackId])
-    var retExp = wrap.CallExpression(returnId, val == null ? null : [val])
+    var retExp = wrap.CallExpression(wrap.MemberExpression(returnId, returnId), val == null ? null : [val])
     return wrap.FunctionExpression(wrap.BlockStatement(
       [stackPop, retExp].map(wrap.ExpressionStatement)
     ), [val])
@@ -645,7 +651,8 @@ module.exports = function convert(node) {
   function transformFunctionHelper(func, contin, varContin) {
     var decContin = makeVarContin(func, varContin)
     var bodyFunc = dispatch(func, 'body', wrapReturn, decContin)
-    var stackPush = wrap.ExpressionStatement(wrap.CallExpression(pushStackId, [stackId, scopeId]))
+    var callInfo = wrap.MemberExpression(returnId, callInfoId)
+    var stackPush = wrap.ExpressionStatement(wrap.CallExpression(pushStackId, [stackId, scopeId, callInfo]))
     addParentScope(bodyFunc.body.body)
     var runBody = wrap.ExpressionStatement(wrap.CallExpression(continuation(bodyFunc, null, func.sha)))
     decContin.index.apply(decContin, func.params)
@@ -7106,10 +7113,12 @@ window.run = function run(str) {
   scopeInfoMap.set(__globalScope, globalScopeInfo)
   globalScopeInfo.viewAll = true
 
-  function __pushStack(stack, scope) {
+  function __pushStack(stack, scope, callInfo) {
+    callInfo = callInfo ? ast[1][callInfo] : null
     stack.push({ scopeMeta: scopeInfoMap.get(scope)[1]
                , scope: scope
                , progInfo: ast[1]
+               , callInfo: callInfo
                })
   }
 

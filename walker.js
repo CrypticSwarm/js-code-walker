@@ -18,10 +18,12 @@ function run(str) {
   scopeInfoMap.set(__globalScope, globalScopeInfo)
   globalScopeInfo.viewAll = true
 
-  function __pushStack(stack, scope) {
+  function __pushStack(stack, scope, callInfo) {
+    callInfo = callInfo ? ast[1][callInfo] : null
     stack.push({ scopeMeta: scopeInfoMap.get(scope)[1]
                , scope: scope
                , progInfo: ast[1]
+               , callInfo: callInfo
                })
   }
 
