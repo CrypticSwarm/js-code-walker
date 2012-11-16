@@ -44,7 +44,7 @@ ace.require(['ace/range'], function(a) {
   editor.getSession().setMode("ace/mode/javascript")
 
   var width = 300,
-    height = 500
+    height = 600
 
   var tree = d3.layout.tree()
     .size([width, height - 160])

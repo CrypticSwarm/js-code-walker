@@ -697,6 +697,52 @@ module.exports = function convert(node) {
     }
   }
 
+  function transformUpdateExpression(upExp, contin, varContin) {
+    upExp = cloneSha(upExp, wrap.UpdateExpression(upExp.operator, upExp.argument, upExp.prefix))
+    return convertHelper(upExp, 'argument', [], finish, varContin)
+    function finish(sym) {
+      var exp = continuation(upExp, contin())
+      exp.params = sym
+      return exp
+    }
+  }
+
+  function transformForStatement(forSt, contin, varContin) {
+    forSt = cloneSha(forSt, wrap.ForStatement(forSt.init, forSt.test, forSt.update, forSt.body))
+    var nextSym = gensym()
+    var bodySym = gensym()
+    var testSym = gensym()
+    var updateSym = gensym()
+    return convertInit()
+    function convertInit() {
+      return convertHelper(forSt, 'init', [], convertFor, varContin)
+    }
+    function convertFor(sym) {
+      var varDec = wrap.VariableDeclaration(
+        [ wrap.VariableDeclarator(testSym
+          , convertHelper(forSt, 'test', sym, getIfSt, varContin))
+        , wrap.VariableDeclarator(bodySym
+          , dispatch(forSt, 'body', callSym.bind(null, updateSym), varContin))
+        , wrap.VariableDeclarator(updateSym
+          , dispatch(forSt, 'update', callSym.bind(null, testSym), varContin))
+        ,  wrap.VariableDeclarator(nextSym, contin())
+      ])
+      return wrap.FunctionExpression(wrap.BlockStatement(
+        [ varDec
+        , wrap.ExpressionStatement(wrap.CallExpression(callSym(testSym)))] ), sym)
+    }
+    function getIfSt(sym) {
+      var ifSt = wrap.IfStatement(sym[0]
+          , wrap.ExpressionStatement(wrap.CallExpression(callSym(bodySym)))
+          , wrap.ExpressionStatement(wrap.CallExpression(callSym(nextSym))))
+      return wrap.FunctionExpression(wrap.BlockStatement([ifSt]), sym)
+    }
+    function callSym(sym) {
+      return wrap.FunctionExpression(wrap.BlockStatement([
+        wrap.ExpressionStatement(wrap.CallExpression(sym))]), sym)
+    }
+  }
+
   transform = { Identifier: transformIdentifier
               , Program: transformProgram
               , BlockStatement: transformBlockStatement
@@ -710,6 +756,8 @@ module.exports = function convert(node) {
               , AssignmentExpression: transformBinaryExpression
               , ReturnStatement: transformReturnStatement
               , IfStatement: transformIfStatement
+              , UpdateExpression: transformUpdateExpression
+              , ForStatement: transformForStatement
               }
 
   return [transformProgram(node), nodeList]
@@ -823,6 +871,14 @@ function IfStatement(test, consq, alt) {
   return { type: 'IfStatement', test: test, consequent: consq, alternate: alt || null }
 }
 
+function UpdateExpression(op, arg, pre) {
+  return { type: 'UpdateExpression', operator: op, argument: arg, prefix: pre || false }
+}
+
+function ForStatement(init, test, update, body) {
+  return { type: 'ForStatement', init: init, test: test, update: update, body: body }
+}
+
 module.exports = { ExpressionStatement: ExpressionStatement
                  , Program: Program
                  , BlockStatement: BlockStatement
@@ -842,6 +898,8 @@ module.exports = { ExpressionStatement: ExpressionStatement
                  , ObjectExpression: ObjectExpression
                  , Property: Property
                  , IfStatement: IfStatement
+                 , UpdateExpression: UpdateExpression
+                 , ForStatement: ForStatement
                  , ThisExpression: { type: "ThisExpression" }
                  }
 
