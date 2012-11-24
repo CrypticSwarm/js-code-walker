@@ -1,4 +1,4 @@
-ace.require(['ace/range'], function(a) {
+ace.require(['ace/range'], function progInit(a) {
   var Range = a.Range
 
   var start = d3.select('#start')
@@ -85,54 +85,69 @@ ace.require(['ace/range'], function(a) {
     var nodeItem = node.enter().append('div')
       .attr("class", "node")
 
-    nodeItem.append('p')
+    nodeItem.selectAll('p.title').data(function (d, i) {
+      var funcInfo = d.progInfo[d.progInfo[d.scopeMeta.index].parent]
+      return [{ scopeMeta: d.scopeMeta
+             , funcInfo: funcInfo
+             , callInfo: d.callInfo
+             , key: 'func'
+             , markIndex: { func: [funcInfo] }
+             , marks: {}
+             }]
+    })
+      .enter()
+      .append('p')
       .attr('class', 'title')
       .text(function (d) {
-        var progInfo = d.progInfo
-        var funcInfo = progInfo[progInfo[d.scopeMeta.index].parent]
-        var callInfo = d.callInfo
-        if (funcInfo.type === 'Program') return 'Global'
-        var call = callInfo.callee
-        var funcName = funcInfo.id && funcInfo.id.name || prettyprintFunction(funcInfo)
+        if (d.funcInfo.type === 'Program') return 'Global'
+        var call = d.callInfo.callee
+        var funcName = d.funcInfo.id && d.funcInfo.id.name || prettyprintFunction(d.funcInfo)
         var callName = call.type === 'Identifier' ? call.name
-            : call.id && call.id.name || prettyprintFunction(funcInfo)
+            : call.id && call.id.name || prettyprintFunction(d.funcInfo)
         return funcName === callName ? funcName
              : funcName + ' As ' + callName
       })
+      .on('mouseover', mark)
+      .on('mouseout', unmark)
+
+    function mark(d) {
+      var markList = d.marks[d.key] = d.marks[d.key] || []
+      d.markIndex[d.key].forEach(function (ident) {
+        var start = ident.loc.start
+        var end = ident.loc.end
+        var range = new a.Range(start.line - 1, start.column, end.line - 1, end.column)
+        var marker = editor.getSession().addMarker(range,"scopedVariableFinder", "text")
+        markList.push(marker)
+      })
+    }
+
+    function unmark(d) {
+      if (!d.marks[d.key]) return
+      d.marks[d.key].forEach(removeMarker)
+      d.marks[d.key] = []
+    }
 
     nodeItem.append('div')
       .attr('class', 'props')
     .selectAll('p.prop')
       .data(function (d, i) { 
-        return Object.keys(d.scope).map(function(key) {
+        var marks = {}
+        var markIndex = d.progInfo[d.scopeMeta.index]
+        return Object.keys(d.scope).map(function setupPropData(key) {
           return { key: key
                  , val: d.scope[key]
                  , scopeMeta: d.scopeMeta
                  , progInfo:  d.progInfo
+                 , markIndex: markIndex
+                 , marks: marks
                  }
         }) 
       })
       .enter().append("p")
       .attr('class', 'prop')
-      .on('mouseover', function (d) {
-        var scopeIndex = d.progInfo[d.scopeMeta.index]
-        scopeIndex.__marks = scopeIndex.__marks || {}
-        var markList = scopeIndex.__marks[d.key] = scopeIndex.__marks[d.key] || []
-        scopeIndex[d.key].forEach(function (ident) {
-          var start = ident.loc.start
-          var end = ident.loc.end
-          var range = new a.Range(start.line - 1, start.column, end.line - 1, end.column)
-          var marker = editor.getSession().addMarker(range,"scopedVariableFinder", "text")
-          markList.push(marker)
-        })
-      })
-      .on('mouseout', function(d) {
-        var marks = d.progInfo[d.scopeMeta.index].__marks
-        if (!marks[d.key]) return
-        marks[d.key].forEach(removeMarker)
-        marks[d.key] = []
-      })
-      .text(function(d) {
+      .on('mouseover', mark)
+      .on('mouseout', unmark)
+      .text(function propText(d) {
         return d.key + ': ' + (typeof d.val === 'function' ? prettyprintFunction(d.val) : d.val)
       })
   }
