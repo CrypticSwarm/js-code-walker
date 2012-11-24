@@ -41,16 +41,7 @@ ace.require(['ace/range'], function(a) {
   editor.setTheme("ace/theme/twilight")
   editor.getSession().setMode("ace/mode/javascript")
 
-  var width = 300,
-    height = 600
-
-  var tree = d3.layout.tree()
-    .size([width, height - 160])
-    .children(function (d) {
-      var undefined
-      return d.length > 1 ? [d.slice(1)] : undefined
-    })
-    var vis = d3.select("#visualContainer")
+  var vis = d3.select("#visualContainer")
 
   function prettyprintFunction(fn) {
     var name = fn.name ? ' ' + fn.name : ''
@@ -86,10 +77,8 @@ ace.require(['ace/range'], function(a) {
     }
     curExpressionInfo.select('.expVal').text(value)
 
-    var nodes = tree.nodes(data)
-
     var node = vis.selectAll(".node")
-      .data(nodes)
+      .data(data)
 
     node.exit().remove()
 
@@ -99,9 +88,9 @@ ace.require(['ace/range'], function(a) {
     nodeItem.append('p')
       .attr('class', 'title')
       .text(function (d) {
-        var progInfo = d[0].progInfo
-        var funcInfo = progInfo[progInfo[d[0].scopeMeta.index].parent]
-        var callInfo = d[0].callInfo
+        var progInfo = d.progInfo
+        var funcInfo = progInfo[progInfo[d.scopeMeta.index].parent]
+        var callInfo = d.callInfo
         if (funcInfo.type === 'Program') return 'Global'
         var call = callInfo.callee
         var funcName = funcInfo.id && funcInfo.id.name || prettyprintFunction(funcInfo)
@@ -115,11 +104,11 @@ ace.require(['ace/range'], function(a) {
       .attr('class', 'props')
     .selectAll('p.prop')
       .data(function (d, i) { 
-        return Object.keys(d[0].scope).map(function(key) {
+        return Object.keys(d.scope).map(function(key) {
           return { key: key
-                 , val: d[0].scope[key]
-                 , scopeMeta: d[0].scopeMeta
-                 , progInfo:  d[0].progInfo
+                 , val: d.scope[key]
+                 , scopeMeta: d.scopeMeta
+                 , progInfo:  d.progInfo
                  }
         }) 
       })
