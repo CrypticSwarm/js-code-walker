@@ -1,7 +1,5 @@
 ace.require(['ace/range'], function(a) {
   var Range = a.Range
-  var code = 'function add(a, b) { return a + b }\nfunction makeAdder(a){\n\treturn function plus(b) {\n\t\treturn add(a, b)\n\t}\n}\nvar add1 = makeAdder(1)\nvar add2 = makeAdder(2)\nadd1(5) + add2(6)'
-  d3.select('#editor').html(code)
 
   var start = d3.select('#start')
   var stop = d3.select('#stop')

@@ -30,12 +30,18 @@
     </div>
     <div class="row-fluid" id="main">
       <div class="span7" id="editorContainer">
-<pre id="editor">function foo(items) {
-  var i;
-  for (i = 0; i &lt; items.length; i++) {
-    alert("Ace Rocks " + items[i]);
+<pre id="editor">function add(a, b) {
+  return a + b
+}
+function makeAdder(a){
+  return function plus(b) {
+    return add(a, b)
   }
-}</pre>
+}
+var add1 = makeAdder(1)
+var add2 = makeAdder(2)
+add1(5) + add2(6)
+</pre>
       </div>
       <div class="span5" id="visualContainer"></div>
     </div>
