@@ -52,12 +52,7 @@ ace.require(['ace/range'], function(a) {
       var undefined
       return d.length > 1 ? [d.slice(1)] : undefined
     })
-    var vis = d3.select("#visualContainer").append("svg")
-      .attr("width", width)
-      .attr("height", height)
-      .append("g")
-      .attr("transform", "translate(0, 0)")
-    var diagonal = d3.svg.diagonal()
+    var vis = d3.select("#visualContainer")
 
   function prettyprintFunction(fn) {
     var name = fn.name ? ' ' + fn.name : ''
@@ -78,8 +73,7 @@ ace.require(['ace/range'], function(a) {
   }
 
   function update(data, valInfo, curSha, shaList) {
-    vis.selectAll("path.link").remove()
-    vis.selectAll("g.node").remove()
+    vis.selectAll("div.node").remove()
     if (data.length === 0) return
 
     if (curExpressionMarker) removeMarker(curExpressionMarker)
@@ -96,37 +90,16 @@ ace.require(['ace/range'], function(a) {
 
     var nodes = tree.nodes(data)
 
-    if (data.length > 1) {
-    var link = vis.selectAll("path.link")
-      .data(tree.links(nodes))
-      .enter().append("path")
-      .attr("class", "link")
-      .attr("d", diagonal)
-    }
-
-
-    var node = vis.selectAll("g.node")
+    var node = vis.selectAll(".node")
       .data(nodes)
 
     node.exit().remove()
 
-    var nodeGroup = node.enter().append("g")
+    var nodeItem = node.enter().append('div')
       .attr("class", "node")
-      .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")" })
-      
 
-    nodeGroup.append("rect")
-      .attr("width", 225)
-      .attr('height', 20)
-      .attr('x', -100)
-      .attr('y', 1)
-      .attr('rx', 10)
-      .attr('ry', 10)
-
-    nodeGroup.append('text')
-      .attr('dx', 0)
-      .attr('dy', 14)
-      .attr("text-anchor", "middle")
+    nodeItem.append('p')
+      .attr('class', 'title')
       .text(function (d) {
         var progInfo = d[0].progInfo
         var funcInfo = progInfo[progInfo[d[0].scopeMeta.index].parent]
@@ -140,15 +113,9 @@ ace.require(['ace/range'], function(a) {
              : funcName + ' As ' + callName
       })
 
-    nodeGroup.append("rect")
-      .attr("height", function (d) { return Object.keys(d[0].scope).length * 20 })
-      .attr("width", 225)
-      .attr('x', -100)
-      .attr('y', 23)
-      .attr('rx', 10)
-      .attr('ry', 10)
-
-    nodeGroup.selectAll("text.props")
+    nodeItem.append('div')
+      .attr('class', 'props')
+    .selectAll('p.prop')
       .data(function (d, i) { 
         return Object.keys(d[0].scope).map(function(key) {
           return { key: key
@@ -158,11 +125,8 @@ ace.require(['ace/range'], function(a) {
                  }
         }) 
       })
-      .enter().append("text")
-      .attr("class", 'props')
-      .attr("dx", -90)
-      .attr("dy", function (d, i) { return i * 20 + 36 })
-      .attr("text-anchor", "before")
+      .enter().append("p")
+      .attr('class', 'prop')
       .on('mouseover', function (d) {
         var scopeIndex = d.progInfo[d.scopeMeta.index]
         scopeIndex.__marks = scopeIndex.__marks || {}
