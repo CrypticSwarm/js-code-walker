@@ -48,8 +48,7 @@ ace.require(['ace/range'], function progInit(a) {
     return '[Function' + name + ']'
   }
 
-  function setMarker(sha, shaList, type) {
-    var exp = shaList[sha]
+  function setMarker(type, exp) {
     var start = exp.loc.start
     var end = exp.loc.end
     var range = new a.Range(start.line - 1, start.column, end.line - 1, end.column)
@@ -66,7 +65,7 @@ ace.require(['ace/range'], function progInit(a) {
     if (data.length === 0) return
 
     if (curExpressionMarker) removeMarker(curExpressionMarker)
-    curExpressionMarker = setMarker(curSha, shaList, 'curExpression')
+    curExpressionMarker = setMarker('curExpression', shaList[curSha])
 
     curExpressionInfo.classed('hidden', false).select('.expType').text(shaList[curSha].type)
 
@@ -112,13 +111,8 @@ ace.require(['ace/range'], function progInit(a) {
 
     function mark(d) {
       var markList = d.marks[d.key] = d.marks[d.key] || []
-      d.markIndex[d.key].forEach(function (ident) {
-        var start = ident.loc.start
-        var end = ident.loc.end
-        var range = new a.Range(start.line - 1, start.column, end.line - 1, end.column)
-        var marker = editor.getSession().addMarker(range,"scopedVariableFinder", "text")
-        markList.push(marker)
-      })
+      var createMarks = setMarker.bind(null, 'scopedVariableFinder')
+      d.marks[d.key] = d.markIndex[d.key].map(createMarks).concat(markList)
     }
 
     function unmark(d) {
