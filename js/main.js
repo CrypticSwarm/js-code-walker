@@ -60,6 +60,18 @@ ace.require(['ace/range'], function progInit(a) {
     editor.getSession().removeMarker(marker)
   }
 
+  function mark(d) {
+    var markList = d.marks[d.key] = d.marks[d.key] || []
+    var createMarks = setMarker.bind(null, 'scopedVariableFinder')
+    d.marks[d.key] = d.markIndex[d.key].map(createMarks).concat(markList)
+  }
+
+  function unmark(d) {
+    if (!d.marks[d.key]) return
+    d.marks[d.key].forEach(removeMarker)
+    d.marks[d.key] = []
+  }
+
   function update(data, valInfo, curSha, shaList) {
     vis.selectAll("div.node").remove()
     if (data.length === 0) return
@@ -108,18 +120,6 @@ ace.require(['ace/range'], function progInit(a) {
       })
       .on('mouseover', mark)
       .on('mouseout', unmark)
-
-    function mark(d) {
-      var markList = d.marks[d.key] = d.marks[d.key] || []
-      var createMarks = setMarker.bind(null, 'scopedVariableFinder')
-      d.marks[d.key] = d.markIndex[d.key].map(createMarks).concat(markList)
-    }
-
-    function unmark(d) {
-      if (!d.marks[d.key]) return
-      d.marks[d.key].forEach(removeMarker)
-      d.marks[d.key] = []
-    }
 
     nodeItem.append('div')
       .attr('class', 'props')
