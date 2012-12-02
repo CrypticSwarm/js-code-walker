@@ -9,7 +9,7 @@ function run(str) {
   var scopeInfoMap = new WeakMap()
   var globalScopeInfo = Memory.Scope({ a: 1, b: 2}, Memory({}))
   var __globalScope = globalScopeInfo[0]
-  var __stack = []
+  var __stack = null;
   var emitter = new EventEmitter()
   var ast = convert(esprima(str, { loc: true }))
   var code = escodegen(ast[0])
@@ -20,15 +20,16 @@ function run(str) {
 
   function __pushStack(stack, scope, callInfo) {
     callInfo = callInfo ? ast[1][callInfo] : null
-    stack.push({ scopeMeta: scopeInfoMap.get(scope)[1]
-               , scope: scope
-               , progInfo: ast[1]
-               , callInfo: callInfo
-               })
+    __stack = { scopeMeta: scopeInfoMap.get(scope)[1]
+              , scope: scope
+              , progInfo: ast[1]
+              , callInfo: callInfo
+              , caller: stack
+              }
   }
 
   function __popStack(stack) {
-    stack.pop()
+    __stack = __stack.caller
   }
 
   function __createScopeObject(scopeDef, parentScope, scopeIndexSha) {
@@ -41,7 +42,7 @@ function run(str) {
   }
 
   function __end(val) {
-    __stack.pop()
+    __popStack(__stack)
     emitter.emit('tick', __stack)
     emitter.emit('end', __stack)
   }

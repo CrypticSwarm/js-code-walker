@@ -72,9 +72,15 @@ ace.require(['ace/range'], function progInit(a) {
     d.marks[d.key] = []
   }
 
+  var stackTree = d3.layout.tree()
+    .children(function (d) {
+      return d.caller ? [d.caller] : null;
+    })
+
   function update(data, valInfo, curSha, shaList) {
     vis.selectAll("div.node").remove()
-    if (data.length === 0) return
+    if (!data) return
+    var nodes = stackTree.nodes(data)
 
     if (curExpressionMarker) removeMarker(curExpressionMarker)
     curExpressionMarker = setMarker('curExpression', shaList[curSha])
@@ -89,7 +95,7 @@ ace.require(['ace/range'], function progInit(a) {
     curExpressionInfo.select('.expVal').text(value)
 
     var node = vis.selectAll(".node")
-      .data(data)
+      .data(nodes)
 
     node.exit().remove()
 
