@@ -29,7 +29,7 @@
       </div>
     </div>
     <div class="row-fluid" id="main">
-      <div class="span7" id="editorContainer">
+      <div class="span6" id="editorContainer">
 <pre id="editor">function add(a, b) {
   return a + b
 }
@@ -43,7 +43,12 @@ var add2 = makeAdder(2)
 add1(5) + add2(6)
 </pre>
       </div>
-      <div class="span5" id="visualContainer"></div>
+      <div class="span3" id="scopeVis">
+        <h3 class="colheading">Scope Chain</h3>
+      </div>
+      <div class="span3" id="stackVis">
+        <h3 class="colheading">CallStack</h3>
+      </div>
     </div>
   </div>
     <script src="ace/ace.js"></script>

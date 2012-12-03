@@ -43,7 +43,8 @@ ace.require(['ace/range'], function progInit(a) {
   editor.setTheme("ace/theme/twilight")
   editor.getSession().setMode("ace/mode/javascript")
 
-  var vis = d3.select("#visualContainer")
+  var stackVis = d3.select("#stackVis")
+  var scopeVis = d3.select("#scopeVis")
 
   function prettyprintFunction(fn) {
     var name = fn.name ? ' ' + fn.name : ''
@@ -81,17 +82,18 @@ ace.require(['ace/range'], function progInit(a) {
 
   var scopeTree = d3.layout.tree()
     .children(function (scopeMeta) {
-      return scopeMeta.parentScope ? [scopeMeta.parentScope] : null
+      return scopeMeta.parentScope.index ? [scopeMeta.parentScope] : null
     })
 
   function update(contin, shaList) {
-    vis.selectAll("div.node").remove()
+    stackVis.selectAll("div.stackFrame").remove()
+    scopeVis.selectAll("div.scopes").remove()
     if (!contin) return
     var valInfo = contin.valInfo
     var curSha = contin.callState.tokenSha
     var stack = contin.callState.stack
 
-    var stackFrames = stackTree.nodes(stack).reverse()
+    var callStack = stackTree.nodes(stack).reverse()
     var scopeChain = scopeTree.nodes(stack.scopeMeta).reverse()
 
     if (curExpressionMarker) removeMarker(curExpressionMarker)
@@ -106,27 +108,33 @@ ace.require(['ace/range'], function progInit(a) {
     }
     curExpressionInfo.select('.expVal').text(value)
 
-    var node = vis.selectAll(".node")
-      .data(stackFrames)
+    var stackFrames = stackVis.selectAll(".stackFrame")
+      .data(callStack)
 
-    node.exit().remove()
+    stackFrames.exit().remove()
 
-    var nodeItem = node.enter().append('div')
-      .attr("class", "node")
+    var stackItem = stackFrames.enter().append('div')
+      .attr("class", "stackFrame")
 
-    nodeItem.selectAll('p.title').data(function (d, i) {
-      var funcInfo = d.progInfo[d.progInfo[d.scopeMeta.index].parent]
-      return [{ scopeMeta: d.scopeMeta
-             , funcInfo: funcInfo
-             , callInfo: d.callInfo
-             , key: 'func'
-             , markIndex: { func: [funcInfo] }
-             , marks: {}
-             }]
+    function getStackFrameInfo(key) {
+      return function getStackFrameInfo(d, i) {
+        var funcInfo = shaList[d.progInfo[d.scopeMeta.index].parent]
+        return [{ funcInfo: funcInfo
+              , callInfo: d.callInfo
+              , key: key
+              , markIndex: { definition: [funcInfo], callSite: [d.callInfo] }
+              , marks: {}
+              }]
+      }
+    }
+
+    stackItem.classed('scoped', function (d) {
+      return d === stack
     })
+
+    stackItem.selectAll('p.title').data(getStackFrameInfo('definition'))
       .enter()
-      .append('p')
-      .attr('class', 'title')
+      .append('p').attr('class', 'title')
       .text(function (d) {
         if (d.funcInfo.type === 'Program') return 'Global'
         var call = d.callInfo.callee
@@ -139,17 +147,47 @@ ace.require(['ace/range'], function progInit(a) {
       .on('mouseover', mark)
       .on('mouseout', unmark)
 
-    nodeItem.append('div')
+    stackItem.selectAll('p.definition')
+      .data(getStackFrameInfo('definition')).enter()
+      .append('p').attr('class', 'section definition')
+      .text('Definition')
+      .on('mouseover', mark)
+      .on('mouseout', unmark)
+
+    stackItem.selectAll('p.callsite')
+      .data(function (d, i) {
+        return i === 0 ? [] : getStackFrameInfo('callSite')(d, i)
+      }).enter()
+      .append('p').attr('class', 'section callsite')
+      .text('CallSite')
+      .on('mouseover', mark)
+      .on('mouseout', unmark)
+
+
+    var scopes = scopeVis.selectAll(".scopes")
+      .data(scopeChain)
+    scopes.exit().remove()
+
+    var scopeItem = scopes.enter().append('div')
+      .attr("class", "scopes")
+
+    scopeItem.append('div')
       .attr('class', 'props')
     .selectAll('p.prop')
-      .data(function (d, i) { 
+      .data(function (d, i) {
         var marks = {}
-        var markIndex = d.progInfo[d.scopeMeta.index]
-        return Object.keys(d.scope).map(function setupPropData(key) {
+        var markIndex = shaList[d.index]
+        var special = ['arguments', 'this']
+        return Object.keys(d.scope).sort(function (a, b) {
+          var aSpec = ~special.indexOf(a)
+          var bSpec = ~special.indexOf(b)
+          return aSpec && bSpec ? String.localeCompare(a, b)
+           : aSpec ? 1
+           : bSpec ? -1
+           : String.localeCompare(a, b)
+        }).map(function setupPropData(key) {
           return { key: key
                  , val: d.scope[key]
-                 , scopeMeta: d.scopeMeta
-                 , progInfo:  d.progInfo
                  , markIndex: markIndex
                  , marks: marks
                  }

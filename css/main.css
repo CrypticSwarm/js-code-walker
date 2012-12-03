@@ -43,15 +43,26 @@ body {
   display: none;
 }
 
-div.node {
+div.stackFrame, div.scopes {
   background-color: #ccc;
   border: 1px solid #ffcc99;
   border-radius: 10px;
   margin: 10px 0px;
+  overflow: hidden;
 }
-
-div.node div.props {
+div.stackFrame p, div.scopes p.prop {
+  margin: 0px;
+  -moz-box-sizing: border-box;
+  box-sizing: border-box;
   padding: 10px;
+}
+div.stackFrame p.section {
+  width: 49%;
+  text-align: center;
+  float: left;
+}
+p.section + p.section {
+  border-left: 1px solid black
 }
 p.title {
   background-color: #aaa;
@@ -59,3 +70,12 @@ p.title {
   border-radius: 10px 10px 0px 0px;
 }
 
+div.stackFrame.scoped {
+  background-color: #bbb;
+}
+
+h3.colheading {
+  line-height: 25px;
+  margin: 0px 0px 10px 0px;
+  text-align: center;
+}
