@@ -6,7 +6,7 @@ ace.require(['ace/range'], function progInit(a) {
   var next = d3.select('#next')
   var prev = d3.select('#prev')
   var curExpressionInfo = d3.select('#curExpressionInfo')
-  var prog
+  var prog, shaList
   var curExpressionMarker
 
   next.on('click', function () {
@@ -21,6 +21,7 @@ ace.require(['ace/range'], function progInit(a) {
     var code = editor.getSession().getValue()
     editor.setReadOnly(true)
     prog = run(code, 14)
+    shaList = prog[1]
     prog.on('tick', update)
     prog.on('end', enableCode)
     prog.next()
@@ -35,6 +36,7 @@ ace.require(['ace/range'], function progInit(a) {
     start.classed('disabled', false)
     editor.setReadOnly(false)
     prog = null
+    shaList = null
   }
 
   var editor = ace.edit("editor")
@@ -74,13 +76,23 @@ ace.require(['ace/range'], function progInit(a) {
 
   var stackTree = d3.layout.tree()
     .children(function (d) {
-      return d.caller ? [d.caller] : null;
+      return d.caller ? [d.caller] : null
     })
 
-  function update(data, valInfo, curSha, shaList) {
+  var scopeTree = d3.layout.tree()
+    .children(function (scopeMeta) {
+      return scopeMeta.parentScope ? [scopeMeta.parentScope] : null
+    })
+
+  function update(contin, shaList) {
     vis.selectAll("div.node").remove()
-    if (!data) return
-    var nodes = stackTree.nodes(data)
+    if (!contin) return
+    var valInfo = contin.valInfo
+    var curSha = contin.callState.tokenSha
+    var stack = contin.callState.stack
+
+    var stackFrames = stackTree.nodes(stack).reverse()
+    var scopeChain = scopeTree.nodes(stack.scopeMeta).reverse()
 
     if (curExpressionMarker) removeMarker(curExpressionMarker)
     curExpressionMarker = setMarker('curExpression', shaList[curSha])
@@ -95,7 +107,7 @@ ace.require(['ace/range'], function progInit(a) {
     curExpressionInfo.select('.expVal').text(value)
 
     var node = vis.selectAll(".node")
-      .data(nodes)
+      .data(stackFrames)
 
     node.exit().remove()
 

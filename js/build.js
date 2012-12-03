@@ -6964,6 +6964,9 @@ function createScopeObject(initialObject, parentScopeInfo) {
     return true
   }
 
+  emitter.parentScope = parentScopeInfo[1]
+  emitter.scope = varDiff
+
   emitter.__defineSetter__('viewAll', function (val) {
     varDiffMeta.viewAll = val
     return true
@@ -7162,23 +7165,24 @@ window.run = function run(str) {
   var scopeInfoMap = new WeakMap()
   var globalScopeInfo = Memory.Scope({ a: 1, b: 2}, Memory({}))
   var __globalScope = globalScopeInfo[0]
-  var __stack = null; 
+  var __stack = null;
+  var currentContin = null;
   var emitter = new EventEmitter()
   var ast = convert(esprima(str, { loc: true }))
   var code = escodegen(ast[0])
 
   emitter.next = function () { eval(code) }
   scopeInfoMap.set(__globalScope, globalScopeInfo)
-  globalScopeInfo.viewAll = true
+  globalScopeInfo[1].parent = null
 
   function __pushStack(stack, scope, callInfo) {
     callInfo = callInfo ? ast[1][callInfo] : null
     __stack = { scopeMeta: scopeInfoMap.get(scope)[1]
-            , scope: scope
-            , progInfo: ast[1]
-            , callInfo: callInfo
-            , caller: stack
-            }
+              , scope: scope
+              , progInfo: ast[1]
+              , callInfo: callInfo
+              , caller: stack
+              }
   }
 
   function __popStack(stack) {
@@ -7196,19 +7200,31 @@ window.run = function run(str) {
 
   function __end(val) {
     __popStack(__stack)
-    emitter.emit('tick', __stack)
+    emitter.emit('tick', null)
     emitter.emit('end', __stack)
+  }
+
+  function createCallState(stack, tokenSha) {
+    // Add callstate into sha list...
+    return { tokenSha: tokenSha, stack: stack }
+  }
+
+  function createContinuation(cc, cs, valInfo, next) {
+    // Add contin into sha list...
+    return { parentContin: cc, callState: cs, valInfo: valInfo, next: next }
   }
 
   function __continuation(curSha, val, cb) {
     var valInfo = { hasVal: true, value: val }
     if (arguments.length === 2) {
       cb = val
-      val=null
+      valInfo.value = val = null
       valInfo.hasVal = false
     }
-    var curScope = __stack[__stack.length - 1]
-    emitter.emit('tick', __stack, valInfo, curSha, ast[1])
+
+    var callState = createCallState(__stack, curSha)
+    var contin = createContinuation(currentContin, callState, valInfo, cb)
+    emitter.emit('tick', contin, ast[1])
     emitter.next = cb.bind(null, val)
   }
 
