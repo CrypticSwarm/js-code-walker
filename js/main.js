@@ -13,10 +13,15 @@ ace.require(['ace/range'], function progInit(a) {
     if (prog) prog.next()
   })
 
+  prev.on('click', function () {
+    if (prog) prog.prev()
+  })
+
   start.on('click', function () {
     if (prog != null) return
     start.classed('disabled', true)
     next.classed('disabled', false)
+    prev.classed('disabled', false)
     stop.classed('disabled', false)
     var code = editor.getSession().getValue()
     editor.setReadOnly(true)
@@ -33,6 +38,7 @@ ace.require(['ace/range'], function progInit(a) {
     curExpressionInfo.classed('hidden', true)
     stop.classed('disabled', true)
     next.classed('disabled', true)
+    prev.classed('disabled', true)
     start.classed('disabled', false)
     editor.setReadOnly(false)
     prog = null
@@ -90,8 +96,8 @@ ace.require(['ace/range'], function progInit(a) {
     scopeVis.selectAll("div.scopes").remove()
     if (!contin) return
     var valInfo = contin.valInfo
-    var curSha = contin.callState.tokenSha
-    var stack = contin.callState.stack
+    var curSha = contin.tokenSha
+    var stack = contin.stack
 
     var callStack = stackTree.nodes(stack).reverse()
     var scopeChain = scopeTree.nodes(stack.scopeMeta).reverse()
@@ -118,7 +124,7 @@ ace.require(['ace/range'], function progInit(a) {
 
     function getStackFrameInfo(key) {
       return function getStackFrameInfo(d, i) {
-        var funcInfo = shaList[d.progInfo[d.scopeMeta.index].parent]
+        var funcInfo = shaList[shaList[d.scopeMeta.index].parent]
         return [{ funcInfo: funcInfo
               , callInfo: d.callInfo
               , key: key
