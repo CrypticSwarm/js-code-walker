@@ -6818,19 +6818,19 @@ function wrapObj(parent, x) {
       var obj = curObj
       var desc
       while(obj) {
-        desc = Object.getOwnPropertyDescriptor(obj, name);
+        desc = Object.getOwnPropertyDescriptor(obj, name)
         if (desc) obj = null
         else obj = obj.__proto__
       }
       // a trapping proxy's properties must always be configurable
-      if (desc !== undefined) { desc.configurable = true; }
-      return desc;
+      if (desc !== undefined) { desc.configurable = true }
+      return desc
     },
     getOwnPropertyNames: function() {
       return handler.getPropertyNames()
     },
     getPropertyNames: function() {
-      return Object.getOwnPropertyNames(obj);
+      return Object.getOwnPropertyNames(obj)
     },
     enumerate: function() {
       var result = []
@@ -6904,7 +6904,7 @@ function createMemProxy(initialObject) {
 }
 
 
-function createScopeObject(initialObject, parentScopeInfo) {
+function createMemoryScope(initialObject, parentScopeInfo) {
   var varDiffInfo = createMemProxy(initialObject)
   var parentScope = parentScopeInfo[0]
   var parentScopeMeta = parentScopeInfo[1]
@@ -6975,8 +6975,68 @@ function createScopeObject(initialObject, parentScopeInfo) {
   return [varDiff, emitter]
 }
 
+var dummyStackInfo = [null, { getSha: function () { return "" }, setSha: function() {}, on: function () {} }]
+
+function createMemoryStack(parentStackInfo, scopeInfo, callInfo, scopeIndex) {
+  var emitter = new EventEmitter()
+  parentStackInfo = parentStackInfo || dummyStackInfo
+  var parentStack = parentStackInfo[0]
+  var parentStackMeta = parentStackInfo[1]
+  var scope = scopeInfo[0]
+  var scopeMeta = scopeInfo[1]
+  var shaList = {}
+  var curSha
+  var curObj
+
+  setObject(parentStackMeta.getSha(), scopeMeta.getSha())
+  parentStackMeta.on('change', objChange)
+  scopeMeta.on('change', objChange)
+
+  function getObjSha(parent, scope) {
+    return getSha(parent + scope)
+  }
+
+  function objChange() {
+    return setObject(parentStackMeta.getSha(), scopeMeta.getSha())
+  }
+
+  function setObject(parent, scope) {
+    var sha = getObjSha(parent, scope)
+    curSha = sha
+    if (shaList[sha]) curObj = shaList[sha]
+    else {
+      curObj = { parentStack: parent, scope: scope }
+      shaList[sha] = curObj
+    }
+    emitter.emit('change', curObj, curSha)
+  }
+
+  emitter.getSha = function getSha() {
+    return curSha
+  }
+
+  emitter.setSha = function setSha(sha) {
+    if (!shaList[sha]) return false
+    curSha = sha
+    curObj = shaList[sha]
+    parentStackMeta.setSha(curObj.parentStack)
+    scopeMeta.setSha(curObj.scope)
+    emitter.emit('change', curObj, curSha)
+    return true
+  }
+
+  var stackObj = { scope: scope
+                 , caller: parentStack
+                 , callInfo: callInfo 
+                 , scopeMeta: scopeMeta
+                 }
+
+  return [stackObj, emitter]
+}
+
 module.exports = createMemProxy
-createMemProxy.Scope = createScopeObject
+createMemProxy.Scope = createMemoryScope
+createMemProxy.Stack = createMemoryStack
 
 });
 
@@ -7163,7 +7223,8 @@ var EventEmitter = require('events').EventEmitter
 window.run = function run(str) {
   var __undefined
   var scopeInfoMap = new WeakMap()
-  var globalScopeInfo = Memory.Scope({ a: 1, b: 2}, Memory({}))
+  var stackInfoMap = new WeakMap()
+  var globalScopeInfo = Memory.Scope({}, Memory({}))
   var __globalScope = globalScopeInfo[0]
   var __stack = null;
   var currentContin = null;
@@ -7171,18 +7232,17 @@ window.run = function run(str) {
   var ast = convert(esprima(str, { loc: true }))
   var code = escodegen(ast[0])
 
-  emitter.next = function () { eval(code) }
   scopeInfoMap.set(__globalScope, globalScopeInfo)
-  globalScopeInfo[1].parent = null
 
-  function __pushStack(stack, scope, callInfo) {
-    callInfo = callInfo ? ast[1][callInfo] : null
-    __stack = { scopeMeta: scopeInfoMap.get(scope)[1]
-              , scope: scope
-              , progInfo: ast[1]
-              , callInfo: callInfo
-              , caller: stack
-              }
+  function __pushStack(stack, scope, callSha) {
+    callInfo = callSha ? ast[1][callSha] : null
+    var scopeInfo = scopeInfoMap.get(scope)
+    var parentStackInfo = stack ? stackInfoMap.get(stack)
+      : null
+    var scopeIndex = ast[1][scopeInfo[1].index]
+    var stackInfo = Memory.Stack(parentStackInfo, scopeInfo, callInfo, scopeIndex)
+    __stack = stackInfo[0]
+    stackInfoMap.set(stackInfo[0], stackInfo)
   }
 
   function __popStack(stack) {
@@ -7204,15 +7264,24 @@ window.run = function run(str) {
     emitter.emit('end', __stack)
   }
 
-  function createCallState(stack, tokenSha) {
+  function createCallState(stackInfo, stackSha, tokenSha, cb, valInfo) {
     // Add callstate into sha list...
-    return { tokenSha: tokenSha, stack: stack }
+    return { tokenSha: tokenSha, stack: stackInfo[0], go: setSha, func: cb, valInfo: valInfo }
+    function setSha() {
+      stackInfo[1].setSha(stackSha)
+      emitter.emit('tick', this, ast[1])
+    }
   }
 
+  /*
   function createContinuation(cc, cs, valInfo, next) {
     // Add contin into sha list...
     return { parentContin: cc, callState: cs, valInfo: valInfo, next: next }
   }
+  */
+
+  var continList = []
+  var continLoc = -1
 
   function __continuation(curSha, val, cb) {
     var valInfo = { hasVal: true, value: val }
@@ -7222,10 +7291,36 @@ window.run = function run(str) {
       valInfo.hasVal = false
     }
 
-    var callState = createCallState(__stack, curSha)
-    var contin = createContinuation(currentContin, callState, valInfo, cb)
-    emitter.emit('tick', contin, ast[1])
-    emitter.next = cb.bind(null, val)
+    var stackInfo = stackInfoMap.get(__stack)
+    var stackSha = stackInfo[1].getSha()
+    var callState = createCallState(stackInfo, stackSha, curSha, cb, valInfo)
+    continList.push(callState)
+    continLoc++
+    //currentContin = createContinuation(currentContin, callState, valInfo, cb)
+    emitter.emit('tick', callState, ast[1])
+    //emitter.next = cb.bind(null, val)
+  }
+  emitter.next = function () {
+    return eval(code)
+  }
+
+  emitter.next = function () {
+    var contin
+    if (continLoc === -1) return eval(code)
+    if (continLoc === continList.length - 1) {
+      contin = continList[continLoc]
+      return contin.func(contin.valInfo.value)
+    }
+    continLoc++
+    contin = continList[continLoc]
+    return contin.go()
+  }
+
+  emitter.prev = function () {
+    if (continLoc === 0) return
+    continLoc--
+    contin = continList[continLoc]
+    return contin.go()
   }
 
   return emitter
