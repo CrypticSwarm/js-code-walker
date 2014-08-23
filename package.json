@@ -1,0 +1,13 @@
+{ "name": "js-code-walker"
+, "description": "A program to help people learn JS by visualizing the scope chain"
+, "version": "0.1.1"
+, "authors": [ "Perrin Westrich <crypticswarm@gmail.com>" ]
+, "private": true
+, "repository": { "type": "git" }
+, "main": ""
+, "dependencies": {
+    "cpsjs": "^0.1.1",
+    "memory-tree": "0.0.1"
+  }
+, "devDependencies": {}
+}
