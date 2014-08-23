@@ -1,10 +1,10 @@
-var convert = require('../cpsjs/cpstransform')
+var convert = require('cpsjs')
 var esprima = require('esprima').parse
 var escodegen = require('escodegen').generate
-var Memory = require('../memory-tree/memoryProxy')
+var Memory = require('memory-tree/memoryProxy')
 var EventEmitter = require('events').EventEmitter
 
-function run(str) {
+window.run = function run(str) {
   var __undefined
   var scopeInfoMap = new WeakMap()
   var stackInfoMap = new WeakMap()
