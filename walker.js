@@ -4,6 +4,11 @@ var escodegen = require('escodegen').generate
 var Memory = require('memory-tree/memoryProxy')
 var EventEmitter = require('events').EventEmitter
 
+window.transform = function (str) {
+  var x = convert(esprima(str));
+  return [escodegen(x[0]), x[1]];
+};
+
 window.run = function run(str) {
   var __undefined
   var scopeInfoMap = new WeakMap()
@@ -15,6 +20,8 @@ window.run = function run(str) {
   var emitter = new EventEmitter()
   var ast = convert(esprima(str, { loc: true }))
   var code = escodegen(ast[0])
+  window.nodeList = ast[1];
+  window.code = code;
 
   scopeInfoMap.set(__globalScope, globalScopeInfo)
 
