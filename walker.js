@@ -13,7 +13,16 @@ window.run = function run(str) {
   var __undefined
   var scopeInfoMap = new WeakMap()
   var stackInfoMap = new WeakMap()
-  var globalScopeInfo = Memory.Scope({}, Memory({}))
+  var ccnum = 0;
+  var globalScopeInfo = Memory.Scope({}, Memory({
+    callcc: function (val, ret) {
+      var saved_env = continList[continList.length - 1]
+      return val(eval('(function (v) { // '  + (ccnum++) + '\n' +
+      '  saved_env.go();' +
+      '  val(v, ret);' +
+      '})'), ret)
+    }
+  }))
   var __globalScope = globalScopeInfo[0]
   var __stack = null;
   var currentContin = null;
