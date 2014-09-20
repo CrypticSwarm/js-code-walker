@@ -3717,16 +3717,6 @@ function hasOwnProperty(obj, prop) {
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{"./support/isBuffer":21,"_process":20,"inherits":18}],23:[function(require,module,exports){
-var transform = require('./transform')
-
-function convertToCPS(fnBody) {
-  return transform(fnBody)
-}
-
-module.exports = convertToCPS
-
-
-},{"./transform":25}],24:[function(require,module,exports){
 // Predicates
 
 function isFunction(node) {
@@ -3756,7 +3746,7 @@ module.exports = { isSimple: isSimple
                  , isIdentifier: isIdentifier
                  }
 
-},{}],25:[function(require,module,exports){
+},{}],24:[function(require,module,exports){
 var pred = require('./predicates')
 var wrap = require('./wrap')
 var crypto = require('crypto')
@@ -3788,338 +3778,333 @@ function cloneSha(node, clone) {
   return clone
 }
 
-module.exports = function convert(node) {
-  var transform
-  var nodeList = {}
-  function collect(node, parentProp, parentSha) {
-    if (node.phantom) {
-      node.sha = parentSha
-      return parentSha
-    }
-    var h = crypto.createHash('sha1')
-    if (parentProp != null) h.update('' + parentProp)
-    if (parentSha) h.update(parentSha)
-    h.update(JSON.stringify(node))
-    var sha = h.digest('hex')
-    node.sha = sha
-    node.parent = parentSha
-    nodeList[sha] = node
+function continuation(val, func, sha) {
+  sha = sha || val.sha
+  var args = [wrap.Literal(sha), val]
+  if (func != null) args.push(func)
+  return wrap.FunctionExpression(wrap.BlockStatement([
+    wrap.ExpressionStatement(
+      wrap.CallExpression(continId, args))]))
+}
+
+function endingContin() {
+  return wrap.Identifier('__end')
+}
+
+function dotChain(arr) {
+  return arr.map(wrap.Identifier).reduce(wrap.MemberExpression)
+}
+
+function addParentScope(body) {
+  var parScope = wrap.VariableDeclaration([wrap.VariableDeclarator(pscopeId, scopeId)])
+  body.unshift(parScope)
+}
+
+function wrapReturn(val) {
+  var stackPop = wrap.CallExpression(popStackId, [stackId])
+  var retExp = wrap.CallExpression(wrap.MemberExpression(returnId, returnId), val == null ? null : [val])
+  return wrap.FunctionExpression(wrap.BlockStatement(
+    [stackPop, retExp].map(wrap.ExpressionStatement)
+  ), [val])
+}
+
+function funcScopeProps(params) {
+  var slice = dotChain(['Array', 'prototype', 'slice', 'call'])
+  var props = params.map(function (param) {
+    return wrap.Property(param, param)
+  })
+  props.push(wrap.Property(wrap.Identifier('this'), wrap.ThisExpression))
+  props.push(wrap.Property(argId, wrap.CallExpression(slice, [argId, wrap.Literal(0), wrap.UnaryExpression('-', wrap.Literal(1))])))
+  return props
+}
+
+function CPSTransform() {
+  this.nodeList = {}
+}
+
+CPSTransform.prototype.collect = function collect(node, parentProp, parentSha) {
+  if (node.phantom) {
+    node.sha = parentSha
+    return parentSha
   }
+  var h = crypto.createHash('sha1')
+  if (parentProp != null) h.update('' + parentProp)
+  if (parentSha) h.update(parentSha)
+  h.update(JSON.stringify(node))
+  var sha = h.digest('hex')
+  node.sha = sha
+  node.parent = parentSha
+  this.nodeList[sha] = node
+}
 
-  function dispatch(parent, prop, contin, varContin, parentSha) {
-    var node = parent[prop]
-    parentSha = parentSha || parent.sha
-    collect(node, prop, parentSha)
-    return transform[node.type] ? transform[node.type](node, contin, varContin)
-        : continuation(node, contin())
+CPSTransform.prototype.makeVarContin = function makeVarContin(scope, parent) {
+  var self = this;
+  var varDecs = []
+  var info = []
+  var propIndex = {}
+  return { get: join
+          , add: varDecs.push.bind(varDecs)
+          , index: info.push.bind(info)
   }
-
-  function endingContin() {
-    return wrap.Identifier('__end')
-  }
-
-  function continuation(val, func, sha) {
-    sha = sha || val.sha
-    var args = [wrap.Literal(sha), val]
-    if (func != null) args.push(func)
-    return wrap.FunctionExpression(wrap.BlockStatement([
-      wrap.ExpressionStatement(
-        wrap.CallExpression(continId, args))]))
-  }
-
-  function dotChain(arr) {
-    return arr.map(wrap.Identifier).reduce(wrap.MemberExpression)
-  }
-
-  function addParentScope(body) {
-    var parScope = wrap.VariableDeclaration([wrap.VariableDeclarator(pscopeId, scopeId)])
-    body.unshift(parScope)
-  }
-
-  function makeVarContin(scope, parent) {
-    var varDecs = []
-    var info = []
-    var propIndex = {}
-    return { get: join
-           , add: varDecs.push.bind(varDecs)
-           , index: info.push.bind(info)
-    }
-    function join(otherProps) {
-      var props =  varDecToScope(wrap.VariableDeclaration(varDecs.reduce(function appendVar(acc, node) {
-        return acc.concat(node.declarations)
-      }, [])), otherProps)
-      info.forEach(function (identifier) {
-        if (propIndex[identifier.name]) propIndex[identifier.name].push(identifier)
-        else if (parent) parent.index(identifier)
-      })
-      collect(propIndex, scope.sha)
-      propIndex.parent = scope.sha
-      var createScopeCall = wrap.CallExpression(createScopeId, [props, pscopeId, wrap.Literal(propIndex.sha)])
-      var dec = wrap.VariableDeclaration([wrap.VariableDeclarator(scopeId, createScopeCall)])
-      return [dec, propIndex]
-    }
-    function varDecToScope(decs, otherProps) {
-      otherProps = otherProps || []
-      var scopeDef = wrap.ObjectExpression(decs.declarations.map(function(dec) {
-        propIndex[dec.id.name] = []
-        // Possibly need to check for dups and make sure the second has no init it doesn't get added
-        return wrap.Property(dec.id, dec.init == null ? undefinedId : dec.init)
-      }).concat(otherProps))
-      otherProps.forEach(function(prop) {
-        propIndex[prop.key.name] = []
-      })
-      return scopeDef
-    }
-  }
-
-  function transformProgram(prog) {
-    collect(prog)
-    nodeList.toplevel = prog
-    var decContin = makeVarContin(prog)
-    var bodyFunc = transformBlockStatement(prog, endingContin, decContin)
-    var stackPush = wrap.CallExpression(pushStackId, [stackId, scopeId])
-    prog = wrap.Program([stackPush, wrap.CallExpression(continuation(bodyFunc, null, prog.sha))].map(wrap.ExpressionStatement))
-    var decs = decContin.get()
-    decs[0].declarations.unshift(wrap.VariableDeclarator(pscopeId, gscopeId))
-    prog.body.unshift(wrap.ExpressionStatement(wrap.AssignmentExpression(pscopeId, scopeId, '=')))
-    prog.body.unshift(decs[0])
-    return prog
-  }
-
-  function transformBlockStatement(block, contin, varContin) {
-    var body = block.body
-    function convertStatement(i) {
-      return i === body.length ? contin()
-          : dispatch(body, i, convertStatement.bind(null, i+1), varContin, block.sha)
-    }
-    return convertStatement(0)
-  }
-
-  function transformVariableDeclaration(varDec, contin, varContin) {
-    // Pass varDecs to varContin
-    // Transform in place Declarations with init into assignment statements
-    varContin.add(varDec)
-    return convertVarDec(0)
-    function convertVarDec(i) {
-      if (i === varDec.declarations.length) return contin()
-      var dec = varDec.declarations[i]
-      collect(dec, i, varDec.sha)
-      if (!dec.init) return convertVarDec(i+1)
-      var assignExp = wrap.AssignmentExpression(dec.id, dec.init, '=')
-      dec.init = null
-      assignExp.phantom = true
-      return dispatch({ phantom: assignExp, sha: dec.sha }, 'phantom', convertVarDec.bind(null, i+1), varContin)
-    }
-  }
-
-
-  function transformExpressionStatement(exp, contin, varContin) {
-    return dispatch(exp, 'expression', contin, varContin)
-  }
-
-  function transformBinaryExpression(binExp, contin, varContin) {
-    binExp = cloneSha(binExp, wrap.BinaryExpression(binExp.left, binExp.right, binExp.operator))
-    return convertLeft()
-    function convertLeft() {
-      return convertHelper(binExp, 'left', [], convertRight, varContin)
-    }
-    function convertRight(sym) {
-      return convertHelper(binExp, 'right', sym, convertMain, varContin)
-    }
-    function convertMain(sym) {
-      var exp = continuation(binExp, contin())
-      exp.params = sym
-      return exp
-    }
-  }
-
-  function transformCallExpression(callExp, contin, varContin) {
-    callExp = cloneSha(callExp, wrap.CallExpression(callExp.callee, callExp.arguments.slice()))
-    return convertCallee()
-    function convertCallee() {
-      return convertHelper(callExp, 'callee', [], convertArg.bind(null, 0), varContin)
-    }
-    function convertArg(i, param) {
-      return i === callExp.arguments.length ? finish(param)
-          : convertHelper(callExp.arguments, i, param, convertArg.bind(null, i+1), varContin, callExp.sha)
-    }
-    function finish(param) {
-      var nextSym = gensym()
-      var varDec = wrap.VariableDeclaration([wrap.VariableDeclarator(nextSym, contin())])
-      var exp = wrap.FunctionExpression(wrap.BlockStatement([varDec, wrap.ExpressionStatement(callExp)]))
-      exp = continuation(exp, null, callExp.sha)
-      exp.params = param
-      var callInfo = wrap.ObjectExpression([
-        wrap.Property(returnId, nextSym),
-        wrap.Property(callInfoId, wrap.Literal(callExp.sha))
-      ])
-      callExp.arguments.push(callInfo)
-      return exp
-    }
-  }
-
-  function convertHelper(subject, prop, defaultVal, contin, varContin, parentSha) {
-    parentSha = parentSha || subject.sha
-    if (!pred.isSimple(subject[prop])) {
-      var sym = gensym()
-      exp = dispatch(subject, prop, contin.bind(null, [sym]), varContin, parentSha)
-      subject[prop] = sym
-      exp.params = defaultVal
-      return exp
-    }
-    else if (pred.isIdentifier(subject[prop])) {
-      subject[prop] = dispatch(subject, prop, contin.bind(null, defaultVal), varContin, parentSha)
-    }
-    return contin(defaultVal)
-  }
-
-  function transformLiteral(simp, contin, varContin) {
-    return continuation(simp, contin())
-  }
-
-  function transformReturnStatement(retSt, contin, varContin) {
-    // Doesn't use contin only calls so that varDecs can be collected that come after return.
-    // because when you get to a return theres nothing after...
-    contin()
-    return retSt.argument == null ? wrapReturn(null)
-        : dispatch(retSt, 'argument', wrapReturn.bind(null, gensym()), varContin)
-  }
-
-  function wrapReturn(val) {
-    var stackPop = wrap.CallExpression(popStackId, [stackId])
-    var retExp = wrap.CallExpression(wrap.MemberExpression(returnId, returnId), val == null ? null : [val])
-    return wrap.FunctionExpression(wrap.BlockStatement(
-      [stackPop, retExp].map(wrap.ExpressionStatement)
-    ), [val])
-  }
-
-  function funcScopeProps(params) {
-    var slice = dotChain(['Array', 'prototype', 'slice', 'call'])
-    var props = params.map(function (param) {
-      return wrap.Property(param, param)
+  function join(otherProps) {
+    var props =  varDecToScope(wrap.VariableDeclaration(varDecs.reduce(function appendVar(acc, node) {
+      return acc.concat(node.declarations)
+    }, [])), otherProps)
+    info.forEach(function (identifier) {
+      if (propIndex[identifier.name]) propIndex[identifier.name].push(identifier)
+      else if (parent) parent.index(identifier)
     })
-    props.push(wrap.Property(wrap.Identifier('this'), wrap.ThisExpression))
-    props.push(wrap.Property(argId, wrap.CallExpression(slice, [argId, wrap.Literal(0), wrap.UnaryExpression('-', wrap.Literal(1))])))
-    return props
+    self.collect(propIndex, scope.sha)
+    propIndex.parent = scope.sha
+    var createScopeCall = wrap.CallExpression(createScopeId, [props, pscopeId, wrap.Literal(propIndex.sha)])
+    var dec = wrap.VariableDeclaration([wrap.VariableDeclarator(scopeId, createScopeCall)])
+    return [dec, propIndex]
   }
-
-  function transformFunctionHelper(func, contin, varContin) {
-    var decContin = makeVarContin(func, varContin)
-    var bodyFunc = dispatch(func, 'body', wrapReturn, decContin)
-    var callInfo = wrap.MemberExpression(returnId, callInfoId)
-    var stackPush = wrap.ExpressionStatement(wrap.CallExpression(pushStackId, [stackId, scopeId, callInfo]))
-    addParentScope(bodyFunc.body.body)
-    var runBody = wrap.ExpressionStatement(wrap.CallExpression(continuation(bodyFunc, null, func.sha)))
-    decContin.index.apply(decContin, func.params)
-    var decInfo = decContin.get(funcScopeProps(func.params))
-    func.body = wrap.BlockStatement([decInfo[0], stackPush, runBody ])
-    func.params = func.params.concat(returnId)
-    return func
+  function varDecToScope(decs, otherProps) {
+    otherProps = otherProps || []
+    var scopeDef = wrap.ObjectExpression(decs.declarations.map(function(dec) {
+      propIndex[dec.id.name] = []
+      // Possibly need to check for dups and make sure the second has no init it doesn't get added
+      return wrap.Property(dec.id, dec.init == null ? undefinedId : dec.init)
+    }).concat(otherProps))
+    otherProps.forEach(function(prop) {
+      propIndex[prop.key.name] = []
+    })
+    return scopeDef
   }
+}
 
-  function transformFunctionExpression(func, contin, varContin) {
-    func = cloneSha(func, wrap.FunctionExpression(func.body, func.params.slice(), func.id))
-    var bodyFunc = transformFunctionHelper(func, contin, varContin)
-    return continuation(bodyFunc, contin(), func.sha)
+CPSTransform.prototype.dispatch = function dispatch(parent, prop, contin, varContin, parentSha) {
+  var node = parent[prop]
+  parentSha = parentSha || parent.sha
+  this.collect(node, prop, parentSha)
+  if (!this['transform' + node.type]) console.log(node.type);
+  return this['transform' + node.type] ? this['transform' + node.type](node, contin, varContin)
+      : continuation(node, contin())
+}
+
+CPSTransform.prototype.transformProgram = function transformProgram(prog) {
+  this.collect(prog)
+  this.nodeList.toplevel = prog
+  var decContin = this.makeVarContin(prog)
+  var bodyFunc = this.transformBlockStatement(prog, endingContin, decContin)
+  var stackPush = wrap.CallExpression(pushStackId, [stackId, scopeId])
+  prog = wrap.Program([stackPush, wrap.CallExpression(continuation(bodyFunc, null, prog.sha))].map(wrap.ExpressionStatement))
+  var decs = decContin.get()
+  decs[0].declarations.unshift(wrap.VariableDeclarator(pscopeId, gscopeId))
+  prog.body.unshift(wrap.ExpressionStatement(wrap.AssignmentExpression(pscopeId, scopeId, '=')))
+  prog.body.unshift(decs[0])
+  return prog
+}
+
+CPSTransform.prototype.transformBlockStatement = function transformBlockStatement(block, contin, varContin) {
+  var body = block.body
+  var self = this;
+  function convertStatement(i) {
+    return i === body.length ? contin()
+        : self.dispatch(body, i, convertStatement.bind(null, i+1), varContin, block.sha)
   }
+  return convertStatement(0)
+}
 
-  function transformFunctionDeclaration(func, contin, varContin) {
-    varContin.index(func.id)
-    func = cloneSha(func, wrap.FunctionExpression(func.body, func.params.slice(), func.id))
-    var bodyFunc = transformFunctionHelper(func, contin, varContin)
-    varContin.add(wrap.VariableDeclaration([wrap.VariableDeclarator(func.id, bodyFunc)]))
-    return contin()
+CPSTransform.prototype.transformVariableDeclaration = function transformVariableDeclaration(varDec, contin, varContin) {
+  var self = this;
+  // Pass varDecs to varContin
+  // Transform in place Declarations with init into assignment statements
+  varContin.add(varDec)
+  return convertVarDec(0)
+  function convertVarDec(i) {
+    if (i === varDec.declarations.length) return contin()
+    var dec = varDec.declarations[i]
+    self.collect(dec, i, varDec.sha)
+    if (!dec.init) return convertVarDec(i+1)
+    var assignExp = wrap.AssignmentExpression(dec.id, dec.init, '=')
+    dec.init = null
+    assignExp.phantom = true
+    return self.dispatch({ phantom: assignExp, sha: dec.sha }, 'phantom', convertVarDec.bind(null, i+1), varContin)
   }
+}
 
-  function transformIdentifier(id, contin, varContin) {
-    varContin.index(id)
-    return wrap.MemberExpression(scopeId, id)
+CPSTransform.prototype.transformExpressionStatement = function transformExpressionStatement(exp, contin, varContin) {
+  return this.dispatch(exp, 'expression', contin, varContin)
+}
+
+CPSTransform.prototype.transformBinaryExpression = function transformBinaryExpression(binExp, contin, varContin) {
+  var self = this;
+  binExp = cloneSha(binExp, wrap.BinaryExpression(binExp.left, binExp.right, binExp.operator))
+  return convertLeft()
+  function convertLeft() {
+    return self.convertHelper(binExp, 'left', [], convertRight, varContin)
   }
+  function convertRight(sym) {
+    return self.convertHelper(binExp, 'right', sym, convertMain, varContin)
+  }
+  function convertMain(sym) {
+    var exp = continuation(binExp, contin())
+    exp.params = sym
+    return exp
+  }
+}
+CPSTransform.prototype.transformAssignmentExpression = CPSTransform.prototype.transformBinaryExpression
 
-  function transformIfStatement(ifSt, contin, varContin) {
+CPSTransform.prototype.transformCallExpression = function transformCallExpression(callExp, contin, varContin) {
+  var self = this;
+  callExp = cloneSha(callExp, wrap.CallExpression(callExp.callee, callExp.arguments.slice()))
+  return convertCallee()
+  function convertCallee() {
+    return self.convertHelper(callExp, 'callee', [], convertArg.bind(null, 0), varContin)
+  }
+  function convertArg(i, param) {
+    return i === callExp.arguments.length ? finish(param)
+        : self.convertHelper(callExp.arguments, i, param, convertArg.bind(null, i+1), varContin, callExp.sha)
+  }
+  function finish(param) {
     var nextSym = gensym()
     var varDec = wrap.VariableDeclaration([wrap.VariableDeclarator(nextSym, contin())])
-    ifSt = cloneSha(ifSt, wrap.IfStatement(ifSt.test, ifSt.consequent, ifSt.alternate))
-    return convertHelper(ifSt, 'test', [], convertIf, varContin)
-    function getNextContin() {
-      return wrap.FunctionExpression(wrap.BlockStatement([
-        wrap.ExpressionStatement(wrap.CallExpression(nextSym))]))
-    }
-    function convertIf(sym) {
-      ifSt.consequent = wrap.ExpressionStatement(wrap.CallExpression(dispatch(ifSt, 'consequent', getNextContin, varContin)))
-      if (ifSt.alternate) ifSt.alternate = wrap.ExpressionStatement(wrap.CallExpression(dispatch(ifSt, 'alternate', getNextContin, varContin)))
-      return wrap.FunctionExpression(wrap.BlockStatement([varDec, ifSt]), sym)
-    }
+    var exp = wrap.FunctionExpression(wrap.BlockStatement([varDec, wrap.ExpressionStatement(callExp)]))
+    exp = continuation(exp, null, callExp.sha)
+    exp.params = param
+    var callInfo = wrap.ObjectExpression([
+      wrap.Property(returnId, nextSym),
+      wrap.Property(callInfoId, wrap.Literal(callExp.sha))
+    ])
+    callExp.arguments.push(callInfo)
+    return exp
   }
+}
 
-  function transformUpdateExpression(upExp, contin, varContin) {
-    upExp = cloneSha(upExp, wrap.UpdateExpression(upExp.operator, upExp.argument, upExp.prefix))
-    return convertHelper(upExp, 'argument', [], finish, varContin)
-    function finish(sym) {
-      var exp = continuation(upExp, contin())
-      exp.params = sym
-      return exp
-    }
+CPSTransform.prototype.convertHelper = function convertHelper(subject, prop, defaultVal, contin, varContin, parentSha) {
+  parentSha = parentSha || subject.sha
+  if (!pred.isSimple(subject[prop])) {
+    var sym = gensym()
+    exp = this.dispatch(subject, prop, contin.bind(null, [sym]), varContin, parentSha)
+    subject[prop] = sym
+    exp.params = defaultVal
+    return exp
   }
-
-  function transformForStatement(forSt, contin, varContin) {
-    forSt = cloneSha(forSt, wrap.ForStatement(forSt.init, forSt.test, forSt.update, forSt.body))
-    var nextSym = gensym()
-    var bodySym = gensym()
-    var testSym = gensym()
-    var updateSym = gensym()
-    return convertInit()
-    function convertInit() {
-      return convertHelper(forSt, 'init', [], convertFor, varContin)
-    }
-    function convertFor(sym) {
-      var varDec = wrap.VariableDeclaration(
-        [ wrap.VariableDeclarator(testSym
-          , convertHelper(forSt, 'test', sym, getIfSt, varContin))
-        , wrap.VariableDeclarator(bodySym
-          , dispatch(forSt, 'body', callSym.bind(null, updateSym), varContin))
-        , wrap.VariableDeclarator(updateSym
-          , dispatch(forSt, 'update', callSym.bind(null, testSym), varContin))
-        ,  wrap.VariableDeclarator(nextSym, contin())
-      ])
-      return wrap.FunctionExpression(wrap.BlockStatement(
-        [ varDec
-        , wrap.ExpressionStatement(wrap.CallExpression(callSym(testSym)))] ), sym)
-    }
-    function getIfSt(sym) {
-      var ifSt = wrap.IfStatement(sym[0]
-          , wrap.ExpressionStatement(wrap.CallExpression(callSym(bodySym)))
-          , wrap.ExpressionStatement(wrap.CallExpression(callSym(nextSym))))
-      return wrap.FunctionExpression(wrap.BlockStatement([ifSt]), sym)
-    }
-    function callSym(sym) {
-      return wrap.FunctionExpression(wrap.BlockStatement([
-        wrap.ExpressionStatement(wrap.CallExpression(sym))]), sym)
-    }
+  else if (pred.isIdentifier(subject[prop])) {
+    subject[prop] = this.dispatch(subject, prop, contin.bind(null, defaultVal), varContin, parentSha)
   }
+  return contin(defaultVal)
+}
 
-  transform = { Identifier: transformIdentifier
-              , Program: transformProgram
-              , BlockStatement: transformBlockStatement
-              , ExpressionStatement: transformExpressionStatement
-              , FunctionExpression: transformFunctionExpression
-              , FunctionDeclaration: transformFunctionDeclaration
-              , CallExpression: transformCallExpression
-              , Literal: transformLiteral
-              , VariableDeclaration: transformVariableDeclaration
-              , BinaryExpression: transformBinaryExpression
-              , AssignmentExpression: transformBinaryExpression
-              , ReturnStatement: transformReturnStatement
-              , IfStatement: transformIfStatement
-              , UpdateExpression: transformUpdateExpression
-              , ForStatement: transformForStatement
-              }
+CPSTransform.prototype.transformLiteral = function transformLiteral(simp, contin, varContin) {
+  return continuation(simp, contin())
+}
 
-  return [transformProgram(node), nodeList]
+CPSTransform.prototype.transformReturnStatement = function transformReturnStatement(retSt, contin, varContin) {
+  // Doesn't use contin only calls so that varDecs can be collected that come after return.
+  // because when you get to a return theres nothing after...
+  contin()
+  return retSt.argument == null ? wrapReturn(null)
+      : this.dispatch(retSt, 'argument', wrapReturn.bind(null, gensym()), varContin)
+}
+
+CPSTransform.prototype.transformFunctionHelper = function transformFunctionHelper(func, contin, varContin) {
+  var decContin = this.makeVarContin(func, varContin)
+  var bodyFunc = this.dispatch(func, 'body', wrapReturn, decContin)
+  var callInfo = wrap.MemberExpression(returnId, callInfoId)
+  var stackPush = wrap.ExpressionStatement(wrap.CallExpression(pushStackId, [stackId, scopeId, callInfo]))
+  addParentScope(bodyFunc.body.body)
+  var runBody = wrap.ExpressionStatement(wrap.CallExpression(continuation(bodyFunc, null, func.sha)))
+  decContin.index.apply(decContin, func.params)
+  var decInfo = decContin.get(funcScopeProps(func.params))
+  func.body = wrap.BlockStatement([decInfo[0], stackPush, runBody ])
+  func.params = func.params.concat(returnId)
+  return func
+}
+
+CPSTransform.prototype.transformFunctionExpression = function transformFunctionExpression(func, contin, varContin) {
+  func = cloneSha(func, wrap.FunctionExpression(func.body, func.params.slice(), func.id))
+  var bodyFunc = this.transformFunctionHelper(func, contin, varContin)
+  return continuation(bodyFunc, contin(), func.sha)
+}
+
+CPSTransform.prototype.transformFunctionDeclaration = function transformFunctionDeclaration(func, contin, varContin) {
+  varContin.index(func.id)
+  func = cloneSha(func, wrap.FunctionExpression(func.body, func.params.slice(), func.id))
+  var bodyFunc = this.transformFunctionHelper(func, contin, varContin)
+  varContin.add(wrap.VariableDeclaration([wrap.VariableDeclarator(func.id, bodyFunc)]))
+  return contin()
+}
+
+CPSTransform.prototype.transformIdentifier = function transformIdentifier(id, contin, varContin) {
+  varContin.index(id)
+  return wrap.MemberExpression(scopeId, id)
+}
+
+CPSTransform.prototype.transformIfStatement = function transformIfStatement(ifSt, contin, varContin) {
+  var self = this;
+  var nextSym = gensym()
+  var varDec = wrap.VariableDeclaration([wrap.VariableDeclarator(nextSym, contin())])
+  ifSt = cloneSha(ifSt, wrap.IfStatement(ifSt.test, ifSt.consequent, ifSt.alternate))
+  return this.convertHelper(ifSt, 'test', [], convertIf, varContin)
+  function getNextContin() {
+    return wrap.FunctionExpression(wrap.BlockStatement([
+      wrap.ExpressionStatement(wrap.CallExpression(nextSym))]))
+  }
+  function convertIf(sym) {
+    ifSt.consequent = wrap.ExpressionStatement(wrap.CallExpression(self.dispatch(ifSt, 'consequent', getNextContin, varContin)))
+    if (ifSt.alternate) ifSt.alternate = wrap.ExpressionStatement(wrap.CallExpression(self.dispatch(ifSt, 'alternate', getNextContin, varContin)))
+    return wrap.FunctionExpression(wrap.BlockStatement([varDec, ifSt]), sym)
+  }
+}
+
+CPSTransform.prototype.transformUpdateExpression = function transformUpdateExpression(upExp, contin, varContin) {
+  upExp = cloneSha(upExp, wrap.UpdateExpression(upExp.operator, upExp.argument, upExp.prefix))
+  return this.convertHelper(upExp, 'argument', [], finish, varContin)
+  function finish(sym) {
+    var exp = continuation(upExp, contin())
+    exp.params = sym
+    return exp
+  }
+}
+
+CPSTransform.prototype.transformForStatement = function transformForStatement(forSt, contin, varContin) {
+  var self = this;
+  forSt = cloneSha(forSt, wrap.ForStatement(forSt.init, forSt.test, forSt.update, forSt.body))
+  var nextSym = gensym()
+  var bodySym = gensym()
+  var testSym = gensym()
+  var updateSym = gensym()
+  return convertInit()
+  function convertInit() {
+    return self.convertHelper(forSt, 'init', [], convertFor, varContin)
+  }
+  function convertFor(sym) {
+    var varDec = wrap.VariableDeclaration(
+      [ wrap.VariableDeclarator(testSym
+        , self.convertHelper(forSt, 'test', sym, getIfSt, varContin))
+      , wrap.VariableDeclarator(bodySym
+        , self.dispatch(forSt, 'body', callSym.bind(null, updateSym), varContin))
+      , wrap.VariableDeclarator(updateSym
+        , self.dispatch(forSt, 'update', callSym.bind(null, testSym), varContin))
+      ,  wrap.VariableDeclarator(nextSym, contin())
+    ])
+    return wrap.FunctionExpression(wrap.BlockStatement(
+      [ varDec
+      , wrap.ExpressionStatement(wrap.CallExpression(callSym(testSym)))] ), sym)
+  }
+  function getIfSt(sym) {
+    var ifSt = wrap.IfStatement(sym[0]
+        , wrap.ExpressionStatement(wrap.CallExpression(callSym(bodySym)))
+        , wrap.ExpressionStatement(wrap.CallExpression(callSym(nextSym))))
+    return wrap.FunctionExpression(wrap.BlockStatement([ifSt]), sym)
+  }
+  function callSym(sym) {
+    return wrap.FunctionExpression(wrap.BlockStatement([
+      wrap.ExpressionStatement(wrap.CallExpression(sym))]), sym)
+  }
 }
 
 
-},{"./predicates":24,"./wrap":26,"crypto":7}],26:[function(require,module,exports){
+module.exports = function convert(node) {
+  var tranformer = new CPSTransform();
+  return [tranformer.transformProgram(node), tranformer.nodeList]
+}
+
+
+},{"./predicates":23,"./wrap":25,"crypto":7}],25:[function(require,module,exports){
 function bodyBlockType(type) {
   return function wrapBody(ast) {
     if (arguments.length > 1) ast = Array.prototype.slice.call(arguments)
@@ -4227,7 +4212,7 @@ module.exports = { ExpressionStatement: ExpressionStatement
                  }
 
 
-},{}],27:[function(require,module,exports){
+},{}],26:[function(require,module,exports){
 (function (global){
 /*
   Copyright (C) 2012-2013 Yusuke Suzuki <utatane.tea@gmail.com>
@@ -6514,7 +6499,7 @@ module.exports = { ExpressionStatement: ExpressionStatement
 /* vim: set sw=4 ts=4 et tw=80 : */
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./package.json":42,"estraverse":28,"esutils":31,"source-map":32}],28:[function(require,module,exports){
+},{"./package.json":41,"estraverse":27,"esutils":30,"source-map":31}],27:[function(require,module,exports){
 /*
   Copyright (C) 2012-2013 Yusuke Suzuki <utatane.tea@gmail.com>
   Copyright (C) 2012 Ariya Hidayat <ariya.hidayat@gmail.com>
@@ -7205,7 +7190,7 @@ module.exports = { ExpressionStatement: ExpressionStatement
 }));
 /* vim: set sw=4 ts=4 et tw=80 : */
 
-},{}],29:[function(require,module,exports){
+},{}],28:[function(require,module,exports){
 /*
   Copyright (C) 2013 Yusuke Suzuki <utatane.tea@gmail.com>
 
@@ -7297,7 +7282,7 @@ module.exports = { ExpressionStatement: ExpressionStatement
 }());
 /* vim: set sw=4 ts=4 et tw=80 : */
 
-},{}],30:[function(require,module,exports){
+},{}],29:[function(require,module,exports){
 /*
   Copyright (C) 2013 Yusuke Suzuki <utatane.tea@gmail.com>
 
@@ -7416,7 +7401,7 @@ module.exports = { ExpressionStatement: ExpressionStatement
 }());
 /* vim: set sw=4 ts=4 et tw=80 : */
 
-},{"./code":29}],31:[function(require,module,exports){
+},{"./code":28}],30:[function(require,module,exports){
 /*
   Copyright (C) 2013 Yusuke Suzuki <utatane.tea@gmail.com>
 
@@ -7450,7 +7435,7 @@ module.exports = { ExpressionStatement: ExpressionStatement
 }());
 /* vim: set sw=4 ts=4 et tw=80 : */
 
-},{"./code":29,"./keyword":30}],32:[function(require,module,exports){
+},{"./code":28,"./keyword":29}],31:[function(require,module,exports){
 /*
  * Copyright 2009-2011 Mozilla Foundation and contributors
  * Licensed under the New BSD license. See LICENSE.txt or:
@@ -7460,7 +7445,7 @@ exports.SourceMapGenerator = require('./source-map/source-map-generator').Source
 exports.SourceMapConsumer = require('./source-map/source-map-consumer').SourceMapConsumer;
 exports.SourceNode = require('./source-map/source-node').SourceNode;
 
-},{"./source-map/source-map-consumer":37,"./source-map/source-map-generator":38,"./source-map/source-node":39}],33:[function(require,module,exports){
+},{"./source-map/source-map-consumer":36,"./source-map/source-map-generator":37,"./source-map/source-node":38}],32:[function(require,module,exports){
 /* -*- Mode: js; js-indent-level: 2; -*- */
 /*
  * Copyright 2011 Mozilla Foundation and contributors
@@ -7559,7 +7544,7 @@ define(function (require, exports, module) {
 
 });
 
-},{"./util":40,"amdefine":41}],34:[function(require,module,exports){
+},{"./util":39,"amdefine":40}],33:[function(require,module,exports){
 /* -*- Mode: js; js-indent-level: 2; -*- */
 /*
  * Copyright 2011 Mozilla Foundation and contributors
@@ -7705,7 +7690,7 @@ define(function (require, exports, module) {
 
 });
 
-},{"./base64":35,"amdefine":41}],35:[function(require,module,exports){
+},{"./base64":34,"amdefine":40}],34:[function(require,module,exports){
 /* -*- Mode: js; js-indent-level: 2; -*- */
 /*
  * Copyright 2011 Mozilla Foundation and contributors
@@ -7749,7 +7734,7 @@ define(function (require, exports, module) {
 
 });
 
-},{"amdefine":41}],36:[function(require,module,exports){
+},{"amdefine":40}],35:[function(require,module,exports){
 /* -*- Mode: js; js-indent-level: 2; -*- */
 /*
  * Copyright 2011 Mozilla Foundation and contributors
@@ -7832,7 +7817,7 @@ define(function (require, exports, module) {
 
 });
 
-},{"amdefine":41}],37:[function(require,module,exports){
+},{"amdefine":40}],36:[function(require,module,exports){
 /* -*- Mode: js; js-indent-level: 2; -*- */
 /*
  * Copyright 2011 Mozilla Foundation and contributors
@@ -8312,7 +8297,7 @@ define(function (require, exports, module) {
 
 });
 
-},{"./array-set":33,"./base64-vlq":34,"./binary-search":36,"./util":40,"amdefine":41}],38:[function(require,module,exports){
+},{"./array-set":32,"./base64-vlq":33,"./binary-search":35,"./util":39,"amdefine":40}],37:[function(require,module,exports){
 /* -*- Mode: js; js-indent-level: 2; -*- */
 /*
  * Copyright 2011 Mozilla Foundation and contributors
@@ -8717,7 +8702,7 @@ define(function (require, exports, module) {
 
 });
 
-},{"./array-set":33,"./base64-vlq":34,"./util":40,"amdefine":41}],39:[function(require,module,exports){
+},{"./array-set":32,"./base64-vlq":33,"./util":39,"amdefine":40}],38:[function(require,module,exports){
 /* -*- Mode: js; js-indent-level: 2; -*- */
 /*
  * Copyright 2011 Mozilla Foundation and contributors
@@ -9127,7 +9112,7 @@ define(function (require, exports, module) {
 
 });
 
-},{"./source-map-generator":38,"./util":40,"amdefine":41}],40:[function(require,module,exports){
+},{"./source-map-generator":37,"./util":39,"amdefine":40}],39:[function(require,module,exports){
 /* -*- Mode: js; js-indent-level: 2; -*- */
 /*
  * Copyright 2011 Mozilla Foundation and contributors
@@ -9448,7 +9433,7 @@ define(function (require, exports, module) {
 
 });
 
-},{"amdefine":41}],41:[function(require,module,exports){
+},{"amdefine":40}],40:[function(require,module,exports){
 (function (process,__filename){
 /** vim: et:ts=4:sw=4:sts=4
  * @license amdefine 0.1.0 Copyright (c) 2011, The Dojo Foundation All Rights Reserved.
@@ -9751,7 +9736,7 @@ function amdefine(module, requireFn) {
 module.exports = amdefine;
 
 }).call(this,require('_process'),"/node_modules/escodegen/node_modules/source-map/node_modules/amdefine/amdefine.js")
-},{"_process":20,"path":19}],42:[function(require,module,exports){
+},{"_process":20,"path":19}],41:[function(require,module,exports){
 module.exports={
   "name": "escodegen",
   "description": "ECMAScript code generator",
@@ -9821,7 +9806,7 @@ module.exports={
   "_from": "escodegen@"
 }
 
-},{}],43:[function(require,module,exports){
+},{}],42:[function(require,module,exports){
 /*
   Copyright (C) 2013 Ariya Hidayat <ariya.hidayat@gmail.com>
   Copyright (C) 2013 Thaddee Tyl <thaddee.tyl@gmail.com>
@@ -13579,7 +13564,7 @@ parseStatement: true, parseSourceElement: true */
 }));
 /* vim: set sw=4 ts=4 et tw=80 : */
 
-},{}],44:[function(require,module,exports){
+},{}],43:[function(require,module,exports){
 var crypto = require('crypto')
 var EventEmitter = require('events').EventEmitter
 
@@ -13589,6 +13574,7 @@ function getSha(data) {
   return h.digest('hex')
 }
 
+var abcfoo = 0;
 function wrapObj(parent, x) {
   var handler = {
     get: function(receiver, name) {
@@ -13641,7 +13627,12 @@ function wrapObj(parent, x) {
   var emitter = new EventEmitter()
   var shaList = {}
   var objList = new WeakMap()
+
+  try{
   var curSha = getSha(parent + JSON.stringify(x))
+  }catch(e) {
+  var curSha = getSha(parent + '-' + abcfoo++)
+  }
   var curObj = x
   shaList[curSha] = curObj
   function getObjSha(obj) {
@@ -13830,24 +13821,40 @@ module.exports = createMemProxy
 createMemProxy.Scope = createMemoryScope
 createMemProxy.Stack = createMemoryStack
 
-},{"crypto":7,"events":17}],45:[function(require,module,exports){
+},{"crypto":7,"events":17}],44:[function(require,module,exports){
 var convert = require('cpsjs')
 var esprima = require('esprima').parse
 var escodegen = require('escodegen').generate
 var Memory = require('memory-tree/memoryProxy')
 var EventEmitter = require('events').EventEmitter
 
+window.transform = function (str) {
+  var x = convert(esprima(str));
+  return [escodegen(x[0]), x[1]];
+};
+
 window.run = function run(str) {
   var __undefined
   var scopeInfoMap = new WeakMap()
   var stackInfoMap = new WeakMap()
-  var globalScopeInfo = Memory.Scope({}, Memory({}))
+  var ccnum = 0;
+  var globalScopeInfo = Memory.Scope({}, Memory({
+    callcc: function (val, ret) {
+      var saved_env = continList[continList.length - 1]
+      return val(eval('(function (v) { // '  + (ccnum++) + '\n' +
+      '  saved_env.go();' +
+      '  val(v, ret);' +
+      '})'), ret)
+    }
+  }))
   var __globalScope = globalScopeInfo[0]
   var __stack = null;
   var currentContin = null;
   var emitter = new EventEmitter()
   var ast = convert(esprima(str, { loc: true }))
   var code = escodegen(ast[0])
+  window.nodeList = ast[1];
+  window.code = code;
 
   scopeInfoMap.set(__globalScope, globalScopeInfo)
 
@@ -13941,4 +13948,4 @@ window.run = function run(str) {
   return emitter
 }
 
-},{"cpsjs":23,"escodegen":27,"esprima":43,"events":17,"memory-tree/memoryProxy":44}]},{},[45]);
+},{"cpsjs":24,"escodegen":26,"esprima":42,"events":17,"memory-tree/memoryProxy":43}]},{},[44]);
